@@ -1,0 +1,18 @@
+{
+  "display_name": "🧠 HTYQ Lite",
+  "author": "HTYQ",
+  "description": "活体引擎轻量化：记忆驱动 + 世界书驱动 + 状态驱动",
+  "version": "3.1.0",
+  "license": "MIT",
+  "type": "extension",
+  "js": "htyq-lite.js",
+  "css": "style.css",
+  "download": "https://github.com/HTYQ/HTYQ-LITE/archive/refs/heads/main.zip",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HTYQ/HTYQ-LITE.git"
+  },
+  "tags": ["world", "memory", "evolution", "rpg", "lorebook", "achievement"],
+  "category": "角色扮演",
+  "minSTVersion": "1.11.0"
+}
