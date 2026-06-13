@@ -293,6 +293,26 @@ window.HTYQ_LITE_UI = (function() {
 
     panelVisible = false;
     refresh();
+
+    /* ★ v3.1.3: 设备检测 — 防桌面端误触手机布局 */
+    (function() {
+      var dd = function() {
+        var htm = document.documentElement;
+        htm.classList.remove('htyq-desktop', 'htyq-mobile', 'htyq-tablet');
+        var hasMouse = matchMedia('(pointer: fine)').matches;
+        var hasTouch = matchMedia('(pointer: coarse)').matches;
+        var canHover = matchMedia('(hover: hover)').matches;
+        if (hasMouse && !hasTouch) {
+          htm.classList.add('htyq-desktop');
+        } else if (!hasMouse && hasTouch && !canHover) {
+          htm.classList.add(screen.width < 600 ? 'htyq-mobile' : 'htyq-tablet');
+        } else {
+          htm.classList.add('htyq-desktop');
+        }
+      };
+      dd();
+      window.addEventListener('resize', dd);
+    })();
   }
 
   function addInputBarButton() {
