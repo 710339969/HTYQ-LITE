@@ -114,18 +114,12 @@ window.HTYQ_LITE_UI = (function() {
   /* ── v3.0.1: 通知历史 ── */
   var _notificationHistory = JSON.parse(localStorage.getItem('htyq_notification_history') || '[]');
   function addNotification(msg, err) {
-    _notificationHistory.unshift({ msg: msg, err: !!err, time: Date.now(), read: false });
+    _notificationHistory.unshift({ msg: msg, err: !!err, time: Date.now() });
     if (_notificationHistory.length > 50) _notificationHistory = _notificationHistory.slice(0, 50);
     try { localStorage.setItem('htyq_notification_history', JSON.stringify(_notificationHistory)); } catch(e) {}
   }
   function getNotificationHistory() { return _notificationHistory.slice(); }
   function showNotificationPanel() {
-    // mark all as read
-    _notificationHistory.forEach(function(n){ n.read = true; });
-    try { localStorage.setItem('htyq_notification_history', JSON.stringify(_notificationHistory)); } catch(e){}
-    // update badge immediately
-    var badge = document.getElementById('htyq-notif-badge');
-    if (badge) { badge.style.display = 'none'; badge.textContent = '0'; }
     var overlay = document.createElement('div');
     overlay.className = 'htyq-modal-overlay';
     var items = _notificationHistory.slice(0, 30);
@@ -228,452 +222,6 @@ window.HTYQ_LITE_UI = (function() {
     return { used: used, total: total, pct: pct };
   }
 
-  /* ═══════════════════ v3.0.2 INFRASTRUCTURE ═══════════════════ */
-
-  /* ── Dirty state tracking ── */
-  var _dirtyState = { dirty: false, what: '' };
-  function markDirty(what) {
-    _dirtyState.dirty = true;
-    _dirtyState.what = what || 'unsaved changes';
-    var dirtyEl = document.getElementById('htyq-ft-dirty');
-    if (dirtyEl) { dirtyEl.style.display = 'flex'; dirtyEl.title = '⚠️ '+_dirtyState.what; }
-  }
-  function markClean() {
-    _dirtyState.dirty = false;
-    _dirtyState.what = '';
-    var dirtyEl = document.getElementById('htyq-ft-dirty');
-    if (dirtyEl) { dirtyEl.style.display = 'none'; dirtyEl.title = ''; }
-  }
-
-  /* ── Auto-notification popup ── */
-  var _notifQueue = JSON.parse(localStorage.getItem('htyq_notif_queue') || '[]');
-  function showAutoNotification(msg, err, duration) {
-    _notifQueue.push({ msg: msg, err: !!err, time: Date.now(), read: false });
-    if (_notifQueue.length > 30) _notifQueue = _notifQueue.slice(-30);
-    try { localStorage.setItem('htyq_notif_queue', JSON.stringify(_notifQueue)); } catch(e) {}
-    var existing = document.getElementById('htyq-auto-notif');
-    if (existing) existing.remove();
-    var el = document.createElement('div');
-    el.id = 'htyq-auto-notif';
-    el.className = 'htyq-auto-notif' + (err ? ' error' : '');
-    el.innerHTML = '<span>' + esc(msg) + '</span><button class="htyq-auto-notif-close">✖</button>';
-    document.body.appendChild(el);
-    el.querySelector('.htyq-auto-notif-close').addEventListener('click', function() { el.remove(); });
-    if (duration !== 0) {
-      var t = duration || 4000;
-      setTimeout(function() {
-        if (el.parentElement) { el.classList.add('fade-out'); setTimeout(function(){ if(el.parentElement) el.remove(); }, 400); }
-      }, t);
-    }
-    addNotification(msg, !!err);
-    _updateBellBadge();
-  }
-  function _updateBellBadge() {
-    var badge = document.getElementById('htyq-notif-badge');
-    if (!badge) return;
-    var unread = _notifQueue.filter(function(n){ return !n.read; }).length;
-    var hist = getNotificationHistory();
-    var unreadHist = hist.filter(function(n){ return !n.read; }).length;
-    var total = unread + unreadHist;
-    if (total > 0) {
-      badge.textContent = total > 99 ? '99+' : String(total);
-      badge.style.display = 'inline-block';
-    } else { badge.style.display = 'none'; }
-  }
-
-  /* ── Evolution summary modal ── */
-  function showEvolutionSummary(resultText, changes) {
-    var existing = document.getElementById('htyq-evo-summary-overlay');
-    if (existing) existing.remove();
-    var overlay = document.createElement('div');
-    overlay.id = 'htyq-evo-summary-overlay';
-    overlay.className = 'htyq-modal-overlay';
-    var changesHtml = '';
-    if (changes && changes.length) {
-      changesHtml = changes.map(function(c) {
-        return '<div class="evo-change-item">' + esc(c) + '</div>';
-      }).join('');
-    }
-    overlay.innerHTML = '<div class="htyq-modal-box htyq-evo-summary-box"><div class="htyq-modal-hdr">🌍 演化摘要</div><div class="htyq-modal-body htyq-evo-summary-body">' + (changesHtml || '<div class="sm gray">' + esc(resultText || '世界已演化') + '</div>') + '</div><div style="padding:8px 16px;display:flex;justify-content:flex-end;gap:6px;"><button class="btn btn-sm" id="htyq-evo-summary-close" style="font-size:10px;">✖ 关闭</button></div></div>';
-    document.body.appendChild(overlay);
-    var closeBtn = document.getElementById('htyq-evo-summary-close');
-    if (closeBtn) closeBtn.addEventListener('click', function(){ overlay.remove(); });
-    overlay.addEventListener('click', function(e){ if (e.target === overlay) overlay.remove(); });
-    setTimeout(function() { if (overlay.parentElement) { overlay.classList.add('fade-out'); setTimeout(function(){ if (overlay.parentElement) overlay.remove(); }, 400); } }, 8000);
-  }
-
-  /* ── Tab badge system ── */
-  function updateTabBadges(state) {
-    if (!state) state = core.loadState();
-    var unlockedCount = state.achievements ? Object.keys(state.achievements).filter(function(k) { return state.achievements[k].unlocked; }).length : 0;
-    var lastViewedAch = parseInt(localStorage.getItem('htyq_last_viewed_ach_count') || '0');
-    var newAchCount = unlockedCount > lastViewedAch ? unlockedCount - lastViewedAch : 0;
-    if (newAchCount > 9) newAchCount = 9;
-    var hist = getNotificationHistory();
-    var unreadNotifs = hist.filter(function(n) { return !n.read; }).length;
-    if (unreadNotifs > 9) unreadNotifs = 9;
-    var evLog = state.eventLog || [];
-    var hasError = false;
-    for (var ei = Math.max(0, evLog.length-5); ei < evLog.length; ei++) {
-      if (evLog[ei] && evLog[ei].isError) { hasError = true; break; }
-    }
-    document.querySelectorAll('.tab-btn').forEach(function(btn) {
-      var tab = btn.getAttribute('data-tab');
-      var badgeEl = btn.querySelector('.tab-badge');
-      var count = 0;
-      if (tab === 'achievements') count = newAchCount;
-      else if (tab === 'notifications' || (tab === 'settings' && unreadNotifs > 0)) count = 0;
-      else if (tab === 'engine' && hasError) count = 1;
-      if (count > 0) {
-        if (!badgeEl) {
-          badgeEl = document.createElement('span');
-          badgeEl.className = 'tab-badge';
-          btn.appendChild(badgeEl);
-        }
-        badgeEl.textContent = String(count);
-        badgeEl.style.display = 'inline-block';
-      } else {
-        if (badgeEl) badgeEl.style.display = 'none';
-      }
-    });
-  }
-
-  /* ── Keyboard shortcuts ── */
-  var _keyboardEnabled = localStorage.getItem('htyq_keyboard_enabled') !== '0';
-  function _handleKeyboardShortcuts(e) {
-    if (!_keyboardEnabled) return;
-    var panel = document.getElementById('htyq-lite-panel');
-    if (!panel) return;
-    var isPanelVisible = panel.classList.contains('show');
-    if ((e.key === 'Escape' || e.key === 'x' || e.key === 'X') && isPanelVisible) {
-      hidePanel(); e.preventDefault(); return;
-    }
-    if (!isPanelVisible) {
-      if (e.ctrlKey && e.shiftKey && e.key === 'H') { togglePanel(); e.preventDefault(); }
-      return;
-    }
-    if (e.ctrlKey && e.shiftKey) {
-      var tabMap = { 'H':'hide','E':'engine','S':'settings','A':'achievements','M':'memory','W':'world','T':'story','B':'worldbook','O':'overview','K':'_shortcuts' };
-      var target = tabMap[e.key.toUpperCase()];
-      if (target === 'hide') { hidePanel(); e.preventDefault(); }
-      else if (target === '_shortcuts') { _showShortcutsHelp(); e.preventDefault(); }
-      else if (target) { switchTab(target); e.preventDefault(); }
-      return;
-    }
-    if (e.key >= '1' && e.key <= '9' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      var target = document.activeElement;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) return;
-      var tabIdx = parseInt(e.key) - 1;
-      var ids = ['overview','achievements','world','memory','engine','story','worldbook','settings','help'];
-      if (tabIdx < ids.length) { switchTab(ids[tabIdx]); e.preventDefault(); }
-      return;
-    }
-    if (e.key === 'r' && !e.ctrlKey && !e.metaKey && !e.altKey) {
-      var target = document.activeElement;
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) return;
-      refresh(); toast('🔄 已刷新'); e.preventDefault();
-    }
-  }
-  function _showShortcutsHelp() {
-    var overlay = document.createElement('div');
-    overlay.className = 'htyq-modal-overlay';
-    overlay.innerHTML = '<div class="htyq-modal-box" style="max-width:380px;"><div class="htyq-modal-hdr">⌨ 快捷键</div><div class="htyq-modal-body" style="font-size:11px;color:#8b949e;line-height:2.2;">' +
-      '<div style="display:flex;justify-content:space-between;"><kbd>Ctrl+Shift+H</kbd><span>开关面板</span></div>' +
-      '<div style="display:flex;justify-content:space-between;"><kbd>Esc</kbd><span>关闭面板</span></div>' +
-      '<div style="display:flex;justify-content:space-between;"><kbd>1-9</kbd><span>切换 Tab</span></div>' +
-      '<div style="display:flex;justify-content:space-between;"><kbd>R</kbd><span>刷新</span></div>' +
-      '<div style="display:flex;justify-content:space-between;"><kbd>Ctrl+Shift+O</kbd><span>总览</span></div>' +
-      '<div style="display:flex;justify-content:space-between;"><kbd>Ctrl+Shift+A</kbd><span>成就</span></div>' +
-      '<div style="display:flex;justify-content:space-between;"><kbd>Ctrl+Shift+W</kbd><span>世界</span></div>' +
-      '<div style="display:flex;justify-content:space-between;"><kbd>Ctrl+Shift+M</kbd><span>记忆</span></div>' +
-      '<div style="display:flex;justify-content:space-between;"><kbd>Ctrl+Shift+E</kbd><span>引擎</span></div>' +
-      '<div style="display:flex;justify-content:space-between;"><kbd>Ctrl+Shift+T</kbd><span>故事</span></div>' +
-      '<div style="display:flex;justify-content:space-between;"><kbd>Ctrl+Shift+B</kbd><span>世界书</span></div>' +
-      '<div style="display:flex;justify-content:space-between;"><kbd>Ctrl+Shift+S</kbd><span>设置</span></div>' +
-      '<div style="display:flex;justify-content:space-between;"><kbd>Ctrl+Shift+K</kbd><span>此帮助</span></div>' +
-      '</div><div class="htyq-modal-actions"><button class="btn btn-sm" id="htyq-shortcuts-close">✖ 关闭</button></div></div>';
-    document.body.appendChild(overlay);
-    document.getElementById('htyq-shortcuts-close').addEventListener('click', function(){ overlay.remove(); });
-    overlay.addEventListener('click', function(e){ if (e.target === overlay) overlay.remove(); });
-  }
-
-  /* ── API health check ── */
-  var _lastApiCheck = 0;
-  var _lastApiStatus = 'unknown';
-  function checkApiHealth(force) {
-    var settings = JSON.parse(localStorage.getItem('htyq_lite_settings') || '{}');
-    var apiUrl = settings.apiUrl || '';
-    if (!apiUrl) { _updateApiStatusIndicator('none'); return; }
-    var now = Date.now();
-    if (!force && now - _lastApiCheck < 60000) return;
-    _lastApiCheck = now;
-    _updateApiStatusIndicator('checking');
-    var url = apiUrl.replace(/\/+$/, '');
-    fetch(url + '/v1/models', { method: 'GET', signal: AbortSignal.timeout(5000) })
-      .then(function(r) {
-        _lastApiStatus = r.ok ? 'ok' : 'error';
-        _updateApiStatusIndicator(_lastApiStatus);
-        if (_lastApiStatus === 'ok') {
-          var info = document.getElementById('htyq-hdr-info');
-          if (info) info.textContent = 'API: ✅';
-        }
-      })
-      ['catch'](function() {
-        fetch(url, { method: 'GET', signal: AbortSignal.timeout(5000) })
-          .then(function(r) {
-            _lastApiStatus = r.ok ? 'ok' : 'error';
-            _updateApiStatusIndicator(_lastApiStatus);
-          })
-          ['catch'](function() {
-            _lastApiStatus = 'error';
-            _updateApiStatusIndicator('error');
-            var info = document.getElementById('htyq-hdr-info');
-            if (info) info.textContent = 'API: ❌';
-          });
-      });
-  }
-  function _updateApiStatusIndicator(status) {
-    var el = document.getElementById('htyq-api-health');
-    if (!el) return;
-    el.className = 'htyq-api-health ' + status;
-    var textMap = { ok: '🟢', error: '🔴', none: '⚫', unknown: '🟡', checking: '🔵' };
-    el.textContent = textMap[status] || '🟡';
-    el.title = status === 'ok' ? 'API 连接正常' : status === 'error' ? 'API 连接异常' : status === 'none' ? '未配置 API' : '检测中...';
-  }
-
-  /* ── Achievement bookmarks ── */
-  function getAchBookmarks() {
-    try { return JSON.parse(localStorage.getItem('htyq_ach_bookmarks') || '[]'); } catch(e) { return []; }
-  }
-  function toggleAchBookmark(achId) {
-    var bms = getAchBookmarks();
-    var idx = bms.indexOf(achId);
-    if (idx >= 0) { bms.splice(idx, 1); toast('⭐ 已取消收藏: '+achId); }
-    else { bms.push(achId); toast('⭐ 已收藏: '+achId); }
-    localStorage.setItem('htyq_ach_bookmarks', JSON.stringify(bms));
-    return idx < 0;
-  }
-  function isAchBookmarked(achId) {
-    return getAchBookmarks().indexOf(achId) >= 0;
-  }
-
-  /* ── First-time wizard ── */
-  function checkFirstTimeWizard() {
-    if (localStorage.getItem('htyq_wizard_done') === '1') return;
-    setTimeout(function() {
-      var panel = document.getElementById('htyq-lite-panel');
-      if (panel && panel.classList.contains('show')) _showFirstTimeWizard();
-    }, 2000);
-  }
-  function _showFirstTimeWizard() {
-    var steps = [
-      { icon: '🔌', title: '配置 API', desc: '打开「设置」→「API 连接」，填上你的 AI 地址和密钥。', tab: 'settings' },
-      { icon: '🎮', title: '选择驱动模式', desc: '在「引擎」页选择自动模式，世界会在后台自动推演。', tab: 'engine' },
-      { icon: '💬', title: '开始聊天', desc: '回到聊天窗口正常对话，每轮消息后世界都会自动演化。', tab: 'overview' }
-    ];
-    var html = '<div class="htyq-wizard">';
-    steps.forEach(function(s) {
-      html += '<div class="htyq-wizard-step" data-tab="'+s.tab+'">';
-      html += '<div class="htyq-wizard-icon">'+s.icon+'</div>';
-      html += '<div><div class="htyq-wizard-title">'+s.title+'</div><div class="htyq-wizard-desc">'+s.desc+'</div></div>';
-      html += '</div>';
-    });
-    html += '<div style="margin-top:12px;display:flex;gap:6px;"><button class="btn btn-primary btn-sm" id="htyq-wizard-gotit">✅ 知道了</button><button class="btn btn-sm" id="htyq-wizard-done">不再显示</button></div></div>';
-    var overlay = document.createElement('div');
-    overlay.className = 'htyq-modal-overlay';
-    overlay.innerHTML = '<div class="htyq-modal-box" style="max-width:420px;"><div class="htyq-modal-hdr">🚀 欢迎使用 HTYQ Lite！</div><div class="htyq-modal-body">'+html+'</div></div>';
-    document.body.appendChild(overlay);
-    document.getElementById('htyq-wizard-gotit').addEventListener('click', function(){ overlay.remove(); });
-    document.getElementById('htyq-wizard-done').addEventListener('click', function(){ localStorage.setItem('htyq_wizard_done', '1'); overlay.remove(); });
-    overlay.addEventListener('click', function(e) {
-      var step = e.target.closest('.htyq-wizard-step');
-      if (step && step.dataset.tab) { overlay.remove(); switchTab(step.dataset.tab); }
-    });
-  }
-
-  /* ── Theme sync ── */
-  function syncThemeWithST() {
-    var htmlEl = document.documentElement;
-    var stTheme = htmlEl.getAttribute('data-theme') || '';
-    var panel = document.getElementById('htyq-lite-panel');
-    if (!panel) return;
-    if (stTheme) {
-      var isLight = stTheme.indexOf('light') >= 0 || stTheme.indexOf('bright') >= 0;
-      panel.classList.toggle('htyq-light-theme', isLight);
-    }
-  }
-
-  /* ── Stats computation ── */
-  function computeStats(state) {
-    if (!state) state = core.loadState();
-    var combos = state.comboHistory || [];
-    var maxCombo = 0;
-    combos.forEach(function(c){ if (c.combo > maxCombo) maxCombo = c.combo; });
-    var totalAch = state.achievements ? Object.keys(state.achievements).filter(function(k){ return state.achievements[k].unlocked; }).length : 0;
-    return {
-      totalRounds: state.round || 0,
-      totalMemories: (state.memories || []).length,
-      totalEvents: (state.events || []).length,
-      totalAchievements: totalAch,
-      totalAchCount: state.achievements ? Object.keys(state.achievements).length : 0,
-      totalEntities: Object.keys(state.emotionMap || {}).length,
-      totalFactions: (state.factions || []).length,
-      totalBattles: (state.combat || {}).totalBattles || 0,
-      maxCombo: maxCombo,
-      totalPlotThreads: (state.plotThreads || []).length,
-      totalChapters: (state.chapterSummaries || []).length,
-      totalVolumes: (state.volumeSummaries || []).length,
-      totalNpcLogs: (state.npcActivityLog || []).length,
-      totalRumors: (state.rumors || []).length,
-      battleWinRate: (state.combat || {}).totalBattles ? Math.round(((state.combat.wins || 0) / (state.combat.totalBattles || 1)) * 100) : 0,
-      timeElapsed: state.inWorldMinutes || 0
-    };
-  }
-
-  /* ── Floating quick-action toolbar ── */
-  function renderFloatingToolbar() {
-    var existing = document.getElementById('htyq-floating-toolbar');
-    if (existing) existing.remove();
-    var toolbar = document.createElement('div');
-    toolbar.id = 'htyq-floating-toolbar';
-    toolbar.className = 'htyq-floating-toolbar';
-    var s = JSON.parse(localStorage.getItem('htyq_lite_settings') || '{}');
-    var currentPreset = s.activePreset || '标准预设';
-    toolbar.innerHTML =
-      '<button class="htyq-ft-btn" id="htyq-ft-evolve" title="推演一轮">⏭</button>' +
-      '<button class="htyq-ft-btn" id="htyq-ft-undo" title="撤销上步">↩</button>' +
-      '<button class="htyq-ft-btn" id="htyq-ft-snapshot" title="保存快照">💾</button>' +
-      '<span class="htyq-ft-sep"></span>' +
-      '<button class="htyq-ft-btn htyq-ft-preset" id="htyq-ft-preset-btn" title="切换预设" style="font-size:10px;">📦 '+esc(currentPreset)+'</button>' +
-      '<span class="htyq-ft-sep"></span>' +
-      '<button class="htyq-ft-btn" id="htyq-ft-time" title="时间预设">⏰</button>' +
-      '<span class="htyq-ft-sep"></span>' +
-      '<button class="htyq-ft-btn" id="htyq-ft-refresh" title="刷新">🔄</button>' +
-      '<span class="htyq-ft-sep"></span>' +
-      '<div class="htyq-ft-dirty" id="htyq-ft-dirty" title="有未保存的更改" style="display:none;">⚠️</div>' +
-      '<div class="htyq-api-health" id="htyq-api-health" title="API 状态">⚫</div>';
-    var panel = document.getElementById('htyq-lite-panel');
-    if (panel) panel.appendChild(toolbar);
-    setTimeout(function(){
-      var evolveBtn = document.getElementById('htyq-ft-evolve');
-      if (evolveBtn) evolveBtn.addEventListener('click', function(){
-        var manBtn = document.getElementById('htyq-manual-evolve');
-        if (manBtn) { manBtn.click(); }
-        else { toast('⚠️ 找不到手动推演按钮', true); }
-      });
-      document.getElementById('htyq-ft-undo').addEventListener('click', function(){
-        var undoBtn = document.getElementById('htyq-undo-btn');
-        if (undoBtn) undoBtn.click(); else toast('无可撤销', true);
-      });
-      document.getElementById('htyq-ft-snapshot').addEventListener('click', function(){
-        var st = core.loadState();
-        if (typeof core.saveSavepoint === 'function') {
-          core.saveSavepoint(st);
-          toast('💾 快照已保存 (轮次 '+(st.round||'')+')');
-        } else { toast('快照功能不可用', true); }
-      });
-      document.getElementById('htyq-ft-refresh').addEventListener('click', function(){ refresh(); toast('🔄 已刷新'); });
-      // preset dropdown popup
-      document.getElementById('htyq-ft-preset-btn').addEventListener('click', function(){
-        var existingPopup = document.getElementById('htyq-ft-preset-popup');
-        if (existingPopup) { existingPopup.classList.toggle('show'); return; }
-        var popup = document.createElement('div');
-        popup.id = 'htyq-ft-preset-popup';
-        popup.className = 'htyq-ft-popup show';
-        var allPresets = ['标准预设','战斗版','探索版','对话版','沉浸版'];
-        var popupHtml = '<div class="htyq-ft-popup-title">📦 切换预设</div>';
-        allPresets.forEach(function(p){
-          popupHtml += '<div class="htyq-ft-popup-item" data-preset="'+esc(p)+'">'+p+'</div>';
-        });
-        popup.innerHTML = popupHtml;
-        document.getElementById('htyq-floating-toolbar').appendChild(popup);
-        popup.querySelectorAll('.htyq-ft-popup-item').forEach(function(item){
-          item.addEventListener('click', function(){
-            var preset = this.dataset.preset;
-            var s2 = JSON.parse(localStorage.getItem('htyq_lite_settings')||'{}');
-            s2.activePreset = preset;
-            localStorage.setItem('htyq_lite_settings', JSON.stringify(s2));
-            toast('📦 预设已切换: '+preset);
-            popup.remove();
-            var btn = document.getElementById('htyq-ft-preset-btn');
-            if (btn) btn.innerHTML = '📦 '+preset;
-            refresh();
-          });
-        });
-        setTimeout(function(){
-          var closer = function(ev) {
-            if (!ev.target.closest('#htyq-ft-preset-btn') && !ev.target.closest('#htyq-ft-preset-popup')) {
-              var p = document.getElementById('htyq-ft-preset-popup');
-              if (p) p.remove();
-              document.removeEventListener('click', closer);
-            }
-          };
-          document.addEventListener('click', closer);
-        }, 10);
-      });
-      // time preset popup
-      document.getElementById('htyq-ft-time').addEventListener('click', function(){
-        var existingPopup = document.getElementById('htyq-ft-time-popup');
-        if (existingPopup) { existingPopup.classList.toggle('show'); return; }
-        var popup = document.createElement('div');
-        popup.id = 'htyq-ft-time-popup';
-        popup.className = 'htyq-ft-popup show';
-        var timePresets = [
-          { label: '⚡ 紧迫', min: 15 },
-          { label: '☀️ 正常', min: 60 },
-          { label: '🌙 缓慢', min: 240 },
-          { label: '🔁 日·夜', min: 720 },
-          { label: '🌱 季节', min: 10080 },
-          { label: '⏩ 快速推进', min: 43200 }
-        ];
-        var popupHtml = '<div class="htyq-ft-popup-title">⏰ 时间预设</div>';
-        timePresets.forEach(function(tp){
-          popupHtml += '<div class="htyq-ft-popup-item" data-min="'+tp.min+'">'+tp.label+'</div>';
-        });
-        popup.innerHTML = popupHtml;
-        document.getElementById('htyq-floating-toolbar').appendChild(popup);
-        popup.querySelectorAll('.htyq-ft-popup-item').forEach(function(item){
-          item.addEventListener('click', function(){
-            var min = parseInt(this.dataset.min);
-            var st = core.loadState();
-            st.timeIncrement = min;
-            core.saveState(st);
-            toast('⏰ 时间增量已设为: '+this.textContent.trim());
-            popup.remove();
-          });
-        });
-        setTimeout(function(){
-          var closer = function(ev) {
-            if (!ev.target.closest('#htyq-ft-time') && !ev.target.closest('#htyq-ft-time-popup')) {
-              var p = document.getElementById('htyq-ft-time-popup');
-              if (p) p.remove();
-              document.removeEventListener('click', closer);
-            }
-          };
-          document.addEventListener('click', closer);
-        }, 10);
-      });
-      checkApiHealth(false);
-    }, 50);
-  }
-
-  /* ── v3.0.2: Override the onMessageReceived to inject evolution summary ── */
-  var _origOnMsgReceived = null;
-  function wrapEvolutionResult() {
-    // Hook into the evolution result detection by watching state changes
-    var st = core.loadState();
-    if (st.lastEvolveResult && st.lastEvolveResult._summarized !== true) {
-      st.lastEvolveResult._summarized = true;
-      core.saveState(st);
-      var changes = [];
-      if (st.lastEvolveResult.newEvents) changes.push('📌 新事件: '+st.lastEvolveResult.newEvents);
-      if (st.lastEvolveResult.npcChanges) changes.push('👥 NPC 变化: '+st.lastEvolveResult.npcChanges);
-      if (st.lastEvolveResult.timeChange) changes.push('⏰ 时间推进: '+st.lastEvolveResult.timeChange);
-      if (st._newlyUnlockedAch) changes.push('🏆 新解锁成就: '+st._newlyUnlockedAch);
-      if (changes.length > 0) showEvolutionSummary('', changes);
-    }
-  }
-
   /* ──────────────── BUILD UI ──────────────── */
   function buildUI() {
     if (document.getElementById('htyq-lite-panel')) return;
@@ -685,36 +233,22 @@ window.HTYQ_LITE_UI = (function() {
     var ids = ['overview','achievements','world','memory','engine','story','worldbook','settings','help'];
     var icons = ['\ud83d\udcca','\ud83c\udfc6','\ud83c\udf0d','\ud83e\udde0','\u2699\ufe0f','\ud83d\udcd6','\ud83d\udcda','\ud83d\udd27','\u2753'];
     var labels = ['\u603b\u89c8','\u6210\u5c31','\u4e16\u754c','\u8bb0\u5fc6','\u5f15\u64ce','\u6545\u4e8b','\u4e16\u754c\u4e66','\u8bbe\u7f6e','\u5e2e\u52a9'];
-    var s = JSON.parse(localStorage.getItem('htyq_lite_settings') || '{}');
-    var currentPreset = s.activePreset || '\u6807\u51c6\u9884\u8bbe';
 
     var html = '';
     // header
-    html += '<div class="hdr"><span class="htyq-status-dot" id="htyq-status-dot" title="\u5f15\u64ce\u72b6\u6001: \u672a\u77e5">\u25cf</span><h1>\u25c8 HTYQ Lite</h1><span class="v">v3.0.2</span><span class="hdr-preset" id="htyq-hdr-preset" title="\u5f53\u524d\u9884\u8bbe" style="font-size:10px;color:#8b949e;background:#21262d;padding:2px 8px;border-radius:8px;cursor:pointer;">\ud83d\udce6 '+esc(currentPreset)+'</span><span class="tw htyq-inject-toggle-wrap" title="\u6ce8\u5165\u5f00\u5173"><label class="tg"><input type="checkbox" id="htyq-inject-toggle" checked><span class="s"></span></label><span class="sm" style="font-size:9px;color:#8b949e;">\ud83d\udc89</span></span><span class="hdr-info" id="htyq-hdr-info">API: \u2699\ufe0f</span><button class="btn btn-sm" id="htyq-search-toggle-btn" title="\u5168\u5c40\u641c\u7d22" style="font-size:12px;padding:2px 6px;">\ud83d\udd0d</button><button class="btn btn-sm" id="htyq-minimize-btn" title="\u6700\u5c0f\u5316" style="font-size:12px;padding:2px 6px;">\u2500</button><span class="htyq-notif-wrapper"><button class="btn btn-sm" id="htyq-notif-bell" title="\u901a\u77e5\u5386\u53f2" style="font-size:14px;padding:2px 6px;">\ud83d\udd14</button><span class="htyq-notif-badge" id="htyq-notif-badge" style="display:none;">0</span></span><button class="btn btn-sm" id="htyq-refresh-btn" title="\u5237\u65b0" style="font-size:12px;padding:2px 6px;">\ud83d\udd04</button><button class="btn btn-sm" id="htyq-hdr-shortcuts" title="\u5feb\u6377\u952e" style="font-size:12px;padding:2px 6px;">\u2328</button><button class="hdr-close">\u2716</button></div>';
+    html += '<div class="hdr"><h1>\u25c8 HTYQ Lite</h1><span class="v">v3.0.1</span><span class="hdr-info">\u6d3b\u4f53\u5f15\u64ce \u00b7 \u5168\u5458\u6295\u7968\u96c6\u6210\u7248</span><button class="btn btn-sm" id="htyq-refresh-btn" style="margin-left:auto;">\ud83d\udd04</button><button class="btn btn-sm" id="htyq-notif-bell" title="\u901a\u77e5\u5386\u53f2" style="font-size:14px;padding:2px 6px;margin-left:4px;">\ud83d\udd14</button><button class="hdr-close">\u2716</button></div>';
     // tab bar
-    html += '<nav class="tab-bar" id="htyq-tab-bar">';
+    html += '<nav class="tab-bar">';
     for (var i = 0; i < ids.length; i++) {
-      html += '<button class="tab-btn' + (i === 0 ? ' active' : '') + '" data-tab="' + ids[i] + '"><span class="tab-btn-content">' + icons[i] + ' ' + labels[i] + '</span></button>';
+      html += '<button class="tab-btn' + (i === 0 ? ' active' : '') + '" data-tab="' + ids[i] + '">' + icons[i] + ' ' + labels[i] + '</button>';
     }
     html += '</nav>';
-    // global search bar
-    html += '<div class="htyq-global-search" id="htyq-global-search-bar" style="display:none;"><input type="text" id="htyq-global-search-input" placeholder="🔍 全局搜索：记忆、成就、角色、事件..." /><div class="htyq-global-search-results" id="htyq-global-search-results"></div></div>';
     // content sections
     for (var i = 0; i < ids.length; i++) {
       html += '<section class="tab-content' + (i === 0 ? ' active' : '') + '" id="tab-' + ids[i] + '"></section>';
     }
     panel.innerHTML = html;
     /* \u2605 v3.0.1: \u62d6\u62fd\u7f29\u653e\u624b\u67c4 */
-    (function(){
-      var cb = panel.querySelector('.hdr-close');
-      if (cb) {
-        cb.addEventListener('touchstart', function(e) {
-          hidePanel();
-          e.stopPropagation();
-          e.preventDefault();
-        }, {passive: false});
-      }
-    })();
     (function(){
       var rh = document.createElement('div');
       rh.className = 'htyq-resize-handle';
@@ -738,62 +272,8 @@ window.HTYQ_LITE_UI = (function() {
       });
       document.addEventListener('mouseup', function(){ isResizing = false; });
     })();
-    /* ★ v3.0.2: 面板拖拽 */
-    (function(){
-      var hdr = panel.querySelector('.hdr');
-      if (!hdr) return;
-      var isDragging = false, dragStartX, dragStartY, dragStartLeft, dragStartTop;
-      function _dragStart(cx, cy) {
-        isDragging = true;
-        dragStartX = cx;
-        dragStartY = cy;
-        var rect = panel.getBoundingClientRect();
-        dragStartLeft = rect.left;
-        dragStartTop = rect.top;
-        panel.style.bottom = '';
-        panel.style.right = '';
-        panel.style.left = dragStartLeft + 'px';
-        panel.style.top = dragStartTop + 'px';
-      }
-      function _dragMove(cx, cy) {
-        if (!isDragging) return;
-        var dx = cx - dragStartX;
-        var dy = cy - dragStartY;
-        panel.style.left = (dragStartLeft + dx) + 'px';
-        panel.style.top = (dragStartTop + dy) + 'px';
-      }
-      function _dragEnd() { isDragging = false; }
-      /* 鼠标拖拽 */
-      hdr.addEventListener('mousedown', function(e) {
-        if (e.target.closest('button') || e.target.closest('.hdr-close')) return;
-        _dragStart(e.clientX, e.clientY);
-        e.preventDefault();
-      });
-      document.addEventListener('mousemove', function(e) { _dragMove(e.clientX, e.clientY); });
-      document.addEventListener('mouseup', _dragEnd);
-      /* 触屏拖拽 */
-      hdr.addEventListener('touchstart', function(e) {
-        if (e.target.closest('button') || e.target.closest('.hdr-close')) return;
-        var t = e.touches[0];
-        _dragStart(t.clientX, t.clientY);
-        e.preventDefault();
-      }, {passive: false});
-      document.addEventListener('touchmove', function(e) {
-        if (!isDragging) return;
-        var t = e.touches[0];
-        _dragMove(t.clientX, t.clientY);
-        e.preventDefault();
-      }, {passive: false});
-      document.addEventListener('touchend', _dragEnd);
-    })();
     document.body.appendChild(panel);
     panelElement = panel;
-    // floating toolbar (v3.0.2) — after panel is in DOM so getElementById works
-    renderFloatingToolbar();
-    // v3.0.2: keyboard shortcuts
-    document.addEventListener('keydown', _handleKeyboardShortcuts);
-    // v3.0.2: theme sync on initial load
-    syncThemeWithST();
 
     // events
     panel.addEventListener('click', function(e) {
@@ -802,145 +282,7 @@ window.HTYQ_LITE_UI = (function() {
       if (e.target.closest('.hdr-close')) { hidePanel(); return; }
       if (e.target.id === 'htyq-refresh-btn') { refresh(); toast('\ud83d\udd04 \u5df2\u5237\u65b0'); return; }
       if (e.target.id === 'htyq-notif-bell') { showNotificationPanel(); return; }
-      if (e.target.id === 'htyq-minimize-btn') {
-        panel.classList.toggle('htyq-minimized');
-        panel.querySelector('.tab-bar').style.display = panel.classList.contains('htyq-minimized') ? 'none' : '';
-        panel.querySelectorAll('.tab-content').forEach(function(tc){ tc.style.display = panel.classList.contains('htyq-minimized') ? 'none' : ''; });
-        panel.querySelector('.htyq-global-search').style.display = 'none';
-        e.target.textContent = panel.classList.contains('htyq-minimized') ? '\u25b2' : '\u2500';
-        return;
-      }
-      if (e.target.id === 'htyq-search-toggle-btn') {
-        var sb = document.getElementById('htyq-global-search-bar');
-        if (sb) {
-          var shown = sb.style.display !== 'none';
-          sb.style.display = shown ? 'none' : 'block';
-          if (!shown) { document.getElementById('htyq-global-search-input').focus(); }
-        }
-        return;
-      }
-      if (e.target.id === 'htyq-undo-btn') {
-        if (window._htyq_undo_snapshot) {
-          var st = core.loadState();
-          var prevRound = st.round;
-          Object.assign(st, JSON.parse(JSON.stringify(window._htyq_undo_snapshot)));
-          st.round = prevRound;
-          core.saveState(st);
-          window._htyq_undo_snapshot = null;
-          toast('\u2705 \u5df2\u64a4\u9500\u4e0a\u4e00\u6b65\u6f14\u5316');
-          refresh();
-        } else {
-          toast('\u26a0\ufe0f \u65e0\u53ef\u64a4\u9500\u7684\u6f14\u5316', true);
-        }
-        return;
-      }
     });
-
-    // inject toggle
-    var injectToggle = document.getElementById('htyq-inject-toggle');
-    if (injectToggle) {
-      injectToggle.addEventListener('change', function(){
-        var enabled = this.checked;
-        localStorage.setItem('htyq_inject_enabled', enabled ? '1' : '0');
-        toast(enabled ? '\ud83d\udc89 \u6ce8\u5165\u5df2\u5f00\u542f' : '\ud83d\udc89 \u6ce8\u5165\u5df2\u6682\u505c');
-        // update status dot
-        var dot = document.getElementById('htyq-status-dot');
-        if (dot) {
-          dot.className = 'htyq-status-dot' + (enabled ? '' : ' paused');
-          dot.title = enabled ? '\u6ce8\u5165\u4e2d' : '\u6ce8\u5165\u5df2\u6682\u505c';
-        }
-      });
-      // load saved state
-      var savedInject = localStorage.getItem('htyq_inject_enabled');
-      if (savedInject === '0') {
-        injectToggle.checked = false;
-      }
-    }
-
-      // hdr-preset click -> switch to settings
-    var hdrPreset = document.getElementById('htyq-hdr-preset');
-    if (hdrPreset) hdrPreset.addEventListener('click', function(){ switchTab('settings'); });
-    // keyboard shortcuts button
-    var hdrShortcuts = document.getElementById('htyq-hdr-shortcuts');
-    if (hdrShortcuts) hdrShortcuts.addEventListener('click', function(){ _showShortcutsHelp(); });
-    // first-time wizard
-    checkFirstTimeWizard();
-  // global search input handler
-    (function(){
-      var searchInp = document.getElementById('htyq-global-search-input');
-      if (searchInp) {
-        searchInp.addEventListener('input', function(){
-          var query = this.value.trim();
-          var resultsEl = document.getElementById('htyq-global-search-results');
-          if (!resultsEl) return;
-          if (!query) { resultsEl.innerHTML = ''; resultsEl.style.display = 'none'; return; }
-          var q = query.toLowerCase();
-          var results = [];
-          var st = core.loadState();
-          // search memories
-          (st.memories||[]).forEach(function(m){
-            var text = (m.summary||m.text||m.event||'').toLowerCase();
-            if (text.indexOf(q) > -1) {
-              results.push({ type: '\ud83d\udcdd', label: (m.summary||m.text||'').substring(0, 60), round: m.round, tab: 'memory' });
-            }
-          });
-          // search achievements
-          if (st.achievements) {
-            Object.keys(st.achievements).forEach(function(k){
-              var a = st.achievements[k];
-              if ((k.toLowerCase().indexOf(q) > -1) || ((a.desc||'').toLowerCase().indexOf(q) > -1)) {
-                results.push({ type: '\ud83c\udfc6', label: k + (a.desc ? ': ' + a.desc : ''), tab: 'achievements' });
-              }
-            });
-          }
-          // search events
-          (st.events||[]).forEach(function(e){
-            if ((e.name||'').toLowerCase().indexOf(q) > -1 || (e.desc||'').toLowerCase().indexOf(q) > -1) {
-              results.push({ type: '\ud83d\udccc', label: e.name + (e.round ? ' (R'+e.round+')' : ''), tab: 'world' });
-            }
-          });
-          // search entities
-          if (st.lifecycles) {
-            Object.keys(st.lifecycles).forEach(function(k){
-              if (k.toLowerCase().indexOf(q) > -1) {
-                results.push({ type: '\ud83d\udc64', label: k, tab: 'world' });
-              }
-            });
-          }
-          // search plot threads
-          (st.plotThreads||[]).forEach(function(p){
-            if ((p.name||'').toLowerCase().indexOf(q) > -1) {
-              results.push({ type: '\ud83e\udde0', label: p.name + (p.status? ' ['+p.status+']' : ''), tab: 'story' });
-            }
-          });
-          // render results
-          results = results.slice(0, 20);
-          if (results.length === 0) {
-            resultsEl.innerHTML = '<div class="gsr-none">\u6ca1\u6709\u5339\u914d\u7ed3\u679c</div>';
-          } else {
-            resultsEl.innerHTML = results.map(function(r){
-              return '<div class="gsr-item" data-tab="'+r.tab+'"><span class="gsr-type">'+r.type+'</span>'+esc(r.label)+'</div>';
-            }).join('');
-            resultsEl.querySelectorAll('.gsr-item').forEach(function(item){
-              item.addEventListener('click', function(){
-                switchTab(this.dataset.tab);
-                resultsEl.innerHTML = '';
-                resultsEl.style.display = 'none';
-                document.getElementById('htyq-global-search-input').value = '';
-              });
-            });
-          }
-          resultsEl.style.display = 'block';
-        });
-        // close results on blur
-        searchInp.addEventListener('blur', function(){
-          setTimeout(function(){
-            var resultsEl = document.getElementById('htyq-global-search-results');
-            if (resultsEl) { resultsEl.innerHTML = ''; resultsEl.style.display = 'none'; }
-          }, 200);
-        });
-      }
-    })();
 
     // add toggle button to input bar (wait for DOM if needed)
     if (document.readyState === 'loading') {
@@ -970,7 +312,6 @@ window.HTYQ_LITE_UI = (function() {
     btn.innerHTML = '';
     btn.title = '\u6253\u5f00 HTYQ Lite \u4e16\u754c\u9762\u677f';
     btn.addEventListener('click', function(e) { e.stopPropagation(); togglePanel(); });
-    btn.addEventListener('touchstart', function(e) { e.stopPropagation(); togglePanel(); e.preventDefault(); }, {passive: false});
     bar.appendChild(btn);
   }
 
@@ -980,24 +321,19 @@ window.HTYQ_LITE_UI = (function() {
   }
   function showPanel() {
     if (!panelElement) return;
-    panelElement.style.display = '';
-    panelElement.classList.add('show');
+    panelElement.style.display = 'flex';
     panelVisible = true;
     refresh();
   }
   function hidePanel() {
     if (!panelElement) return;
-    panelElement.style.display = '';
-    panelElement.classList.remove('show');
+    panelElement.style.display = 'none';
     panelVisible = false;
   }
   function resetUI() {
     panelVisible = false;
     currentTab = 'overview';
-    if (panelElement) {
-      panelElement.style.display = '';
-      panelElement.classList.remove('show');
-    }
+    if (panelElement) panelElement.style.display = 'none';
   }
 
   function switchTab(tabId) {
@@ -1020,56 +356,6 @@ window.HTYQ_LITE_UI = (function() {
     var target = document.getElementById('tab-' + currentTab);
     if (!target) return;
 
-    // update status indicator
-    var dot = document.getElementById('htyq-status-dot');
-    if (dot) {
-      var dm = state.driveMode || 'ai';
-      var injectEnabled = localStorage.getItem('htyq_inject_enabled') !== '0';
-      var dotClass = 'htyq-status-dot';
-      var dotTitle = '';
-      if (!injectEnabled) {
-        dotClass += ' paused';
-        dotTitle = '\u6ce8\u5165\u5df2\u6682\u505c';
-      } else if (dm === 'ai' || dm === 'auto') {
-        dotClass += ' running';
-        dotTitle = '\u81ea\u52a8\u6a21\u5f0f \u00b7 \u6b63\u5728\u8fd0\u884c';
-      } else if (dm === 'manual') {
-        dotClass += ' manual';
-        dotTitle = '\u624b\u52a8\u6a21\u5f0f \u00b7 \u5f85\u89e6\u53d1';
-      } else if (dm === 'semi') {
-        dotClass += ' semi';
-        dotTitle = '\u534a\u81ea\u52a8\u6a21\u5f0f \u00b7 \u7b49\u5f85\u786e\u8ba4';
-      }
-      dot.className = dotClass;
-      dot.title = dotTitle;
-    }
-
-    // update API status
-    var hdrInfo = document.getElementById('htyq-hdr-info');
-    if (hdrInfo) {
-      var settings = JSON.parse(localStorage.getItem('htyq_lite_settings') || '{}');
-      var apiTested = sessionStorage.getItem('htyq_api_last_test') || '';
-      var apiOk = settings.apiUrl ? (apiTested === 'ok' ? '\u2705' : '\u2753') : '--';
-      var roundInfo = '轮次 ' + (state.round || 0);
-      hdrInfo.textContent = apiOk + ' ' + roundInfo;
-    }
-
-    // update notification badge
-    var notifs = getNotificationHistory();
-    var badge = document.getElementById('htyq-notif-badge');
-    if (badge) {
-      var unread = 0;
-      for (var ni = 0; ni < notifs.length; ni++) {
-        if (!notifs[ni].read) unread++;
-      }
-      if (unread > 0) {
-        badge.style.display = 'inline';
-        badge.textContent = unread > 99 ? '99+' : unread;
-      } else {
-        badge.style.display = 'none';
-      }
-    }
-
     switch (currentTab) {
       case 'overview': renderOverview(target, state); break;
       case 'achievements': renderAchievements(target, state); break;
@@ -1081,10 +367,6 @@ window.HTYQ_LITE_UI = (function() {
       case 'settings': renderSettings(target); break;
       case 'help': renderHelp(target, state); break;
     }
-    // v3.0.2: update tab badges
-    updateTabBadges(state);
-    // v3.0.2: check for evolution summary to auto-popup
-    wrapEvolutionResult();
   }
 
   /* ═══════════════════ OVERVIEW ═══════════════════ */
@@ -1127,7 +409,7 @@ window.HTYQ_LITE_UI = (function() {
     html += '<div class="stat-item"><div class="v">'+facC+'</div><div class="l">\u52bf\u529b\u5173\u7cfb</div></div>';
     html += '<div class="stat-item"><div class="v">'+comboC+'</div><div class="l">\u8fde\u51fb</div></div>';
     html += '</div>';
-    html += '<div class="fa mt-8" style="margin-top:-4px;"><button class="btn btn-success" id="htyq-quick-evolve">\u26a1 \u5feb\u901f\u63a8\u6f14\u4e00\u8f6e</button><span class="sm gray" style="margin-left:8px;">\u4e0d\u7528\u5207\u9875\uff0c\u968f\u65f6\u89e6\u53d1<\/span><button class="btn btn-sm" id="htyq-undo-btn" style="margin-left:6px;padding:2px 6px;font-size:11px;">\u21a9 \u64a4\u9500\u4e0a\u6b65</button><span class="sm gray" style="margin-left:4px;">\u4ec5\u4e0a\u4e00\u8f6e</span><\/div><\/div>';
+    html += '<div class="fa mt-8" style="margin-top:-4px;"><button class="btn btn-success" id="htyq-quick-evolve">\u26a1 \u5feb\u901f\u63a8\u6f14\u4e00\u8f6e</button><span class="sm gray" style="margin-left:8px;">\u4e0d\u7528\u5207\u9875\uff0c\u968f\u65f6\u89e6\u53d1<\/span><\/div><\/div>';
 
     // ★ v3.0.1: Token 用量
     var tok = (typeof estimateTokenUsage === 'function') ? estimateTokenUsage(state) : { used: 0, total: 4096, pct: 0 };
@@ -1302,27 +584,6 @@ window.HTYQ_LITE_UI = (function() {
     }
     html += '</div></div></div>';
 
-    // v3.0.2: Stats dashboard
-    var stats = computeStats(state);
-    html += '<div class="card"><div class="card-title">\ud83d\udcca \u7edf\u8ba1\u4eea\u76d8 <span class="bdg">\u6570\u636e\u4e00\u89c8</span></div><div class="stats-grid">';
-    [
-      { v: stats.totalRounds, l: '\u63a8\u6f14\u8f6e\u6570' },
-      { v: stats.totalMemories, l: '\u8bb0\u5fc6' },
-      { v: stats.totalAchievements+'/'+stats.totalAchCount, l: '\u6210\u5c31\u89e3\u9501' },
-      { v: stats.totalEvents, l: '\u4e8b\u4ef6' },
-      { v: stats.totalBattles, l: '\u6218\u6597\u6b21\u6570' },
-      { v: stats.battleWinRate+'%', l: '\u80dc\u7387' },
-      { v: stats.maxCombo, l: '\u6700\u9ad8\u8fde\u51fb' },
-      { v: Math.floor(stats.timeElapsed/1440)+'\u5929', l: '\u4e16\u754c\u65f6\u95f4' },
-      { v: stats.totalEntities, l: '\u89d2\u8272\u6570' },
-      { v: stats.totalFactions, l: '\u52bf\u529b\u6570' },
-      { v: stats.totalPlotThreads, l: '\u5267\u60c5\u7ebf' },
-      { v: stats.totalNpcLogs, l: 'NPC\u6d3b\u52a8' }
-    ].forEach(function(si){
-      html += '<div class="stat-item"><div class="v">'+esc(String(si.v))+'</div><div class="l">'+si.l+'</div></div>';
-    });
-    html += '</div></div>';
-
     cont.innerHTML = html;
 
     // bind world desc editor in overview
@@ -1349,7 +610,6 @@ window.HTYQ_LITE_UI = (function() {
           if (!evolution || typeof evolution.evolve !== 'function') { toast('\u26a0\ufe0f \u6f14\u5316\u6a21\u5757\u672a\u52a0\u8f7d', true); return; }
           this.disabled = true; this.innerHTML = '\u23f3 \u63a8\u6f14\u4e2d...';
           try {
-            window._htyq_undo_snapshot = JSON.parse(JSON.stringify(core.loadState()));
             var st = core.loadState();
             var ctx = (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) ? SillyTavern.getContext() : null;
             var lastMsg = ctx && ctx.chat ? ctx.chat[ctx.chat.length - 1] : null;
@@ -1422,34 +682,8 @@ window.HTYQ_LITE_UI = (function() {
     html += '</div></div>';
 
     // achievement cards
-    html += '<div class="card-row">';
-    html += '<div class="card" style="flex:1;"><div class="card-title">\ud83d\udd25 \u6210\u5c31\u8fde\u51fb</div>';
-    html += '<div class="flex"><div style="font-size:28px;font-weight:700;color:#f0c040;">'+(state.combo||0)+'</div>';
-    // \u8fde\u51fb\u5fbd\u7ae0\u67e5\u627e
-    var comboBadges = {0:'',1:'',2:'\u53cc\u54cd\u70ae',3:'\u4e09\u8fde\u6740',4:'\u56db\u91cd\u594f',5:'\u4e94\u661f\u8fde\u73e0',6:'\u516d\u5408',7:'\u4e03\u661f',8:'\u516b\u65b9\u6765\u671d',9:'\u4e5d\u4e5d\u5f52\u4e00',10:'\u5341\u5168\u5341\u7f8e'};
-    var comboNum = state.combo || 0;
-    var badgeName = comboBadges[comboNum] || (comboNum > 10 ? '\u8d85\u51e1\u5165\u5723' : '');
-    html += '<div><div class="sm gray">\u5f53\u524d\u8fde\u51fb\uff1a<span class="gold">'+(state.combo||0)+' \u8fde</span></div>';
-    html += '<div class="sm gray">\u6700\u9ad8\u7eaa\u5f55\uff1a<span class="gold">'+(state.comboHistory&&state.comboHistory.length?state.comboHistory.reduce(function(a,b){return Math.max(a,b.combo||0);},0):0)+' \u8fde</span></div>';
-    if (badgeName) html += '<div class="sm gray">\u5fbd\u7ae0\uff1a<span class="gold">'+badgeName+'</span></div>';
-    html += '</div></div></div>';
-
-    html += '<div class="card" style="flex:1;"><div class="card-title">\ud83d\udd0a \u6210\u5c31\u56de\u54cd <span class="bdg">\u6ce8\u5165\u4e0a\u4e0b\u6587</span></div>';
-    html += '<div class="sm gray">\u89e3\u9501\u6210\u5c31\u540e\u81ea\u52a8\u6ce8\u5165 AI \u4e0a\u4e0b\u6587\uff0c\u5f71\u54cd\u6545\u4e8b\u8d70\u5411</div>';
-    html += '<div class="echo-l mt-8">';
-    var echoes = (typeof core.getAchievementEchoes === 'function') ? core.getAchievementEchoes(state, 3) : [];
-    if (echoes.length) {
-      for (var echi2 = 0; echi2 < echoes.length; echi2++) {
-        html += '<div class="echo-i">\ud83c\udfc6 '+esc(echoes[echi2].name)+' <span class="gray">#'+(echoes[echi2].round||'?')+'</span></div>';
-      }
-    } else {
-      html += '<div class="echo-i">\u6682\u65e0</div>';
-    }
-    html += '</div></div></div>';
-
-
-html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\udfc5 \u6210\u5c31\u5217\u8868</div>';
-    html += '<div class="flex"><select id="htyq-ach-sort" style="padding:4px 8px;background:#21262d;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:11px;margin-right:4px;"><option value="order">\u9ed8\u8ba4</option><option value="rarity">\u7a00\u6709\u5ea6</option><option value="name">\u540d\u79f0</option><option value="unlocked">\u89e3\u9501\u72b6\u6001</option></select><select id="htyq-ach-filter" style="padding:4px 8px;background:#21262d;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:11px;"><option>\u5168\u90e8</option><option>\u5df2\u89e3\u9501</option><option>\u672a\u89e3\u9501</option><option>\u5df2\u63ed\u793a</option><option>\u278a \u6536\u85cf</option><option>\u751f\u5b58</option><option>\u6218\u6597</option><option>\u4eb2\u5bc6</option><option>\u5947\u8469</option><option>\u63a2\u7d22</option><option>\u793e\u4ea4</option><option>\u6545\u4e8b</option><option>\u6210\u957f</option><option>\u4e16\u754c</option><option>\u5143</option><option>\u9690\u85cf</option></select>';
+    html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\udfc5 \u6210\u5c31\u5217\u8868</div>';
+    html += '<div class="flex"><select id="htyq-ach-sort" style="padding:4px 8px;background:#21262d;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:11px;margin-right:4px;"><option value="order">\u9ed8\u8ba4</option><option value="rarity">\u7a00\u6709\u5ea6</option><option value="name">\u540d\u79f0</option><option value="unlocked">\u89e3\u9501\u72b6\u6001</option></select><select id="htyq-ach-filter" style="padding:4px 8px;background:#21262d;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:11px;"><option>\u5168\u90e8</option><option>\u5df2\u89e3\u9501</option><option>\u672a\u89e3\u9501</option><option>\u5df2\u63ed\u793a</option><option>\u751f\u5b58</option><option>\u6218\u6597</option><option>\u4eb2\u5bc6</option><option>\u5947\u8469</option><option>\u63a2\u7d22</option><option>\u793e\u4ea4</option><option>\u6545\u4e8b</option><option>\u6210\u957f</option><option>\u4e16\u754c</option><option>\u5143</option><option>\u9690\u85cf</option></select>';
     html += '<input type="text" id="htyq-ach-search" placeholder="\u641c\u7d22\u6210\u5c31..." style="padding:4px 8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:11px;width:120px;"></div></div>';
     html += '<div class="ach-grid" id="htyq-ach-grid">';
 
@@ -1483,23 +717,41 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
       if (!isUnlocked && typeof core.unlockAchievement === 'function') {
         html += '<button class="btn btn-sm htyq-ach-unlock-btn" data-ach-id="'+esc(ak)+'" style="font-size:9px;padding:1px 6px;margin-top:4px;">\ud83d\udd13 \u624b\u52a8\u89e3\u9501</button>';
       }
-      // v3.0.2: bookmark toggle
-      var isBm = isAchBookmarked(ak);
-      html += '<button class="btn btn-sm htyq-ach-bookmark" data-ach-id="'+esc(ak)+'" style="font-size:10px;padding:1px 5px;position:absolute;top:2px;left:2px;background:none;border:none;cursor:pointer;color:'+(isBm?'#f0c040':'#484f58')+';" title="'+(isBm?'\u5df2\u6536\u85cf':'\u6536\u85cf')+'">'+(isBm?'\u2b50':'\u2606')+'</button>';
       html += '<div class="rk '+rkClass+'">'+stars+'</div></div>';
       shown++;
     }
-
-    // locked achievements toggle
-    html += '<div class="flex-sb mt-8" style="align-items:center;"><span class="sm gray">\u5171 ' + shown + ' \u4e2a\u6210\u5c31</span>';
-    html += '<button class="btn btn-sm" id="htyq-ach-toggle-locked" style="font-size:10px;padding:2px 12px;">\ud83d\udc41 \u663e\u793a\u672a\u89e3\u9501\u6210\u5c31</button></div>';
     if (shown === 0) {
       html += '<div class="sm gray" style="grid-column:1/-1;text-align:center;padding:20px;">\u6682\u65e0\u6210\u5c31\u5b9a\u4e49</div>';
     }
     html += '</div></div>';
 
     // combo
-    // combo+echoes moved to above achievement list    cont.innerHTML = html;
+    html += '<div class="card-row">';
+    html += '<div class="card" style="flex:1;"><div class="card-title">\ud83d\udd25 \u6210\u5c31\u8fde\u51fb</div>';
+    html += '<div class="flex"><div style="font-size:28px;font-weight:700;color:#f0c040;">'+(state.combo||0)+'</div>';
+    // \u8fde\u51fb\u5fbd\u7ae0\u67e5\u627e
+    var comboBadges = {0:'',1:'',2:'\u53cc\u54cd\u70ae',3:'\u4e09\u8fde\u6740',4:'\u56db\u91cd\u594f',5:'\u4e94\u661f\u8fde\u73e0',6:'\u516d\u5408',7:'\u4e03\u661f',8:'\u516b\u65b9\u6765\u671d',9:'\u4e5d\u4e5d\u5f52\u4e00',10:'\u5341\u5168\u5341\u7f8e'};
+    var comboNum = state.combo || 0;
+    var badgeName = comboBadges[comboNum] || (comboNum > 10 ? '\u8d85\u51e1\u5165\u5723' : '');
+    html += '<div><div class="sm gray">\u5f53\u524d\u8fde\u51fb\uff1a<span class="gold">'+(state.combo||0)+' \u8fde</span></div>';
+    html += '<div class="sm gray">\u6700\u9ad8\u7eaa\u5f55\uff1a<span class="gold">'+(state.comboHistory&&state.comboHistory.length?state.comboHistory.reduce(function(a,b){return Math.max(a,b.combo||0);},0):0)+' \u8fde</span></div>';
+    if (badgeName) html += '<div class="sm gray">\u5fbd\u7ae0\uff1a<span class="gold">'+badgeName+'</span></div>';
+    html += '</div></div></div>';
+
+    html += '<div class="card" style="flex:1;"><div class="card-title">\ud83d\udd0a \u6210\u5c31\u56de\u54cd <span class="bdg">\u6ce8\u5165\u4e0a\u4e0b\u6587</span></div>';
+    html += '<div class="sm gray">\u89e3\u9501\u6210\u5c31\u540e\u81ea\u52a8\u6ce8\u5165 AI \u4e0a\u4e0b\u6587\uff0c\u5f71\u54cd\u6545\u4e8b\u8d70\u5411</div>';
+    html += '<div class="echo-l mt-8">';
+    var echoes = (typeof core.getAchievementEchoes === 'function') ? core.getAchievementEchoes(state, 3) : [];
+    if (echoes.length) {
+      for (var echi2 = 0; echi2 < echoes.length; echi2++) {
+        html += '<div class="echo-i">\ud83c\udfc6 '+esc(echoes[echi2].name)+' <span class="gray">#'+(echoes[echi2].round||'?')+'</span></div>';
+      }
+    } else {
+      html += '<div class="echo-i">\u6682\u65e0</div>';
+    }
+    html += '</div></div></div>';
+
+    cont.innerHTML = html;
 
     // bind ach events
     setTimeout(function(){
@@ -1543,38 +795,6 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
         // re-render with sorted order
         refresh();
       });
-      // v3.0.2: bookmark buttons
-      document.querySelectorAll('.htyq-ach-bookmark').forEach(function(btn){
-        btn.addEventListener('click', function(e){
-          e.stopPropagation();
-          var achId = this.getAttribute('data-ach-id');
-          if (!achId) return;
-          var nowStarred = toggleAchBookmark(achId);
-          this.textContent = nowStarred ? '\u2b50' : '\u2606';
-          this.style.color = nowStarred ? '#f0c040' : '#484f58';
-          this.title = nowStarred ? '\u5df2\u6536\u85cf' : '\u6536\u85cf';
-          toast(nowStarred ? '\u2b50 \u5df2\u6536\u85cf' : '\u2606 \u5df2\u53d6\u6d88\u6536\u85cf');
-        });
-      });
-      // v3.0.2: filter by bookmarks
-      var achFilter = document.getElementById('htyq-ach-filter');
-      if (achFilter) {
-        // The existing filter handler is at the bottom of this setTimeout; we add a wrapper
-        // that checks for 'bookmarked' value before running the original logic
-        // We'll add this handler BEFORE the existing ones
-        var origFilterHandler = achFilter._listeners ? achFilter._listeners : [];
-        achFilter.addEventListener('change', function(){
-          var v = this.value;
-          if (v === '\u278a \u6536\u85cf') {
-            var bookmarks = getAchBookmarks();
-            document.querySelectorAll('#htyq-ach-grid .ach-card').forEach(function(c){
-              var aid = c.getAttribute('data-ach-id');
-              c.style.display = bookmarks.indexOf(aid) >= 0 ? 'block' : 'none';
-            });
-            return;
-          }
-        });
-      }
       // \u2605 v3.0.1: \u624b\u52a8\u89e3\u9501\u6309\u94ae
       document.querySelectorAll('.htyq-ach-unlock-btn').forEach(function(btn){
         btn.addEventListener('click', function(){
@@ -1587,28 +807,7 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
           refresh();
         });
       });
-      
-      // locked achievements toggle
-      var toggleBtn = document.getElementById('htyq-ach-toggle-locked');
-      if (toggleBtn) toggleBtn.addEventListener('click', function(){
-        var grid = document.getElementById('htyq-ach-grid');
-        var lockedCards = grid.querySelectorAll('.ach-card.locked');
-        var isHidden = lockedCards.length > 0 && lockedCards[0].style.display !== 'block';
-
-        lockedCards.forEach(function(c){ c.style.display = isHidden ? 'block' : 'none'; });
-        this.textContent = isHidden ? '\ud83d\udc41 \u9690\u85cf\u672a\u89e3\u9501\u6210\u5c31' : '\ud83d\udc41 \u663e\u793a\u672a\u89e3\u9501\u6210\u5c31';
-      });
-      // initially hide locked achievements on render
-      setTimeout(function(){
-        var grid2 = document.getElementById('htyq-ach-grid');
-        if (grid2) {
-          var locked = grid2.querySelectorAll('.ach-card.locked');
-          for (var li = 0; li < locked.length; li++) locked[li].style.display = 'none';
-          var tb = document.getElementById('htyq-ach-toggle-locked');
-          if (tb) tb.textContent = '\ud83d\udc41 \u663e\u793a\u672a\u89e3\u9501\u6210\u5c31 (\u9690\u85cf ' + locked.length + ' \u4e2a)';
-        }
-      }, 10);
-// \u6210\u5c31\u641c\u7d22
+      // \u6210\u5c31\u641c\u7d22
       var achSearch = document.getElementById('htyq-ach-search');
       if (achSearch) achSearch.addEventListener('input', function(){
         var kw = this.value.trim().toLowerCase();
@@ -1696,9 +895,7 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
         html += '<div class="faction-card" style="border-left:3px solid '+fcolors[fi%fcolors.length]+';">';
         html += '<div style="font-weight:600;font-size:12.5px;">'+esc(f.name)+'</div>';
         html += '<div class="sm gray">\u51dd\u805a\u529b: '+esc(f.cohesion||'-')+' \u00b7 \u8d44\u6e90: '+esc(f.resources||'-')+'</div>';
-        html += '<div class="sm gray">\u76ee\u6807: '+esc(f.goal||'-')+' \u00b7 \u6001\u5ea6: '+esc(f.attitude||'-')+'</div>';
-        html += '<div class="flex" style="gap:2px;margin-top:4px;"><button class="btn btn-sm htyq-faction-edit" data-idx="'+fi+'" style="font-size:9px;padding:1px 5px;">\u270e</button>';
-        html += '<button class="btn btn-sm htyq-faction-del" data-idx="'+fi+'" style="font-size:9px;padding:1px 5px;color:#f85149;">\u2716</button></div></div>';
+        html += '<div class="sm gray">\u76ee\u6807: '+esc(f.goal||'-')+' \u00b7 \u6001\u5ea6: '+esc(f.attitude||'-')+'</div></div>';
       }
     } else {
       html += '<div class="sm gray">\u6682\u65e0\u52bf\u529b</div>';
@@ -1707,10 +904,10 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
     // faction relations
     var facRels = state.factionRelations || [];
     if (facRels.length) {
-      html += '<div class="mt-8"><div class="sm" style="font-weight:600;margin-bottom:4px;">\ud83d\udd17 \u52bf\u529b\u5173\u7cfb\u7f51 <button class="btn btn-sm htyq-facrel-create" style="font-size:9px;padding:0 6px;float:right;">\u2795 \u65b0\u589e</button></div>';
+      html += '<div class="mt-8"><div class="sm" style="font-weight:600;margin-bottom:4px;">\ud83d\udd17 \u52bf\u529b\u5173\u7cfb\u7f51</div>';
       for (var fri = 0; fri < facRels.length; fri++) {
         var fr = facRels[fri];
-        html += '<div class="sm gray" style="margin-bottom:2px;display:flex;justify-content:space-between;align-items:center;"><span>'+esc(fr.from||'')+' \u2192 '+esc(fr.to||'')+' <span style="color:'+(fr.type==='\u654c\u5bf9'?'#f85149':'#7ee787')+'">['+esc(fr.type||'')+']</span></span><span><button class="btn btn-sm htyq-facrel-del" data-idx="'+fri+'" style="font-size:9px;padding:0 4px;color:#f85149;">\u2716</button></span></div>';
+        html += '<div class="sm gray" style="margin-bottom:2px;">'+esc(fr.from||'')+' \u2192 '+esc(fr.to||'')+' <span style="color:'+(fr.type==='\u654c\u5bf9'?'#f85149':'#7ee787')+'">['+esc(fr.type||'')+']</span></div>';
       }
       html += '</div>';
     }
@@ -1729,9 +926,9 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
     var eco = state.economy || {};
     html += '<div class="card-row">';
     html += '<div class="card" style="flex:1;"><div class="card-title">\ud83d\udcb0 \u7ecf\u6d4e\u72b6\u51b5</div>';
-    html += '<div class="flex"><span class="gray">\u5e02\u573a\u8d8b\u52bf\uff1a</span><span>'+esc(eco.marketTrend||'\u5e73\u7a33')+'</span><button class="btn btn-sm htyq-eco-edit" data-field="marketTrend" style="font-size:9px;padding:0 4px;margin-left:4px;">\u270e</button></div>';
-    html += '<div class="flex"><span class="gray">\u8d44\u91d1\u72b6\u51b5\uff1a</span><span>'+esc(eco.fundsStatus||'\u624b\u5934\u7d27')+'</span><button class="btn btn-sm htyq-eco-edit" data-field="fundsStatus" style="font-size:9px;padding:0 4px;margin-left:4px;">\u270e</button></div>';
-    html += '<div class="flex"><span class="gray">\u5173\u952e\u8d44\u6e90\uff1a</span><span>'+esc((eco.keyResources||[]).join(' \u00b7 ')||'-')+'</span><button class="btn btn-sm htyq-eco-edit" data-field="keyResources" style="font-size:9px;padding:0 4px;margin-left:4px;">\u270e</button></div></div>';
+    html += '<div class="flex"><span class="gray">\u5e02\u573a\u8d8b\u52bf\uff1a</span><span>'+esc(eco.marketTrend||'\u5e73\u7a33')+'</span></div>';
+    html += '<div class="flex"><span class="gray">\u8d44\u91d1\u72b6\u51b5\uff1a</span><span>'+esc(eco.fundsStatus||'\u624b\u5934\u7d27')+'</span></div>';
+    html += '<div class="flex"><span class="gray">\u5173\u952e\u8d44\u6e90\uff1a</span><span>'+esc((eco.keyResources||[]).join(' \u00b7 ')||'-')+'</span></div></div>';
 
     html += '<div class="card" style="flex:1;"><div class="card-title">\ud83d\udcdd \u4e16\u754c\u7b80\u8ff0</div>';
     html += '<div class="sm gray">'+esc(state.worldDescription||'\uff08\u6682\u65e0\u7b80\u8ff0\uff0c\u70b9\u51fb\u7f16\u8f91\u6dfb\u52a0\uff09')+'</div>';
@@ -1752,11 +949,11 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
 
     // blood feud + events
     html += '<div class="card-row">';
-    html += '<div class="card" style="flex:1;"><div class="card-title">\u2694\ufe0f \u8840\u4ec7\u5907\u5fd8\u5f55 <button class="btn btn-sm htyq-bloodfeud-create" style="margin-left:auto;font-size:9px;padding:2px 6px;">\u2795 \u65b0\u589e</button></div>';
+    html += '<div class="card" style="flex:1;"><div class="card-title">\u2694\ufe0f \u8840\u4ec7\u5907\u5fd8\u5f55</div>';
     var bf = state.bloodFeudMemo || [];
     if (bf.length) {
       for (var bi = 0; bi < bf.length; bi++) {
-        html += '<div class="sm gray" style="margin-bottom:3px;display:flex;justify-content:space-between;align-items:center;"><span><span style="color:#f85149;font-weight:600;">'+esc(bf[bi].faction)+'</span> \u2014 '+esc(bf[bi].reason||'')+'\uff08'+esc(bf[bi].status||'')+'\uff09</span><span class="flex" style="gap:2px;"><button class="btn btn-sm htyq-bloodfeud-advance" data-idx="'+bi+'" style="font-size:9px;padding:1px 5px;">\u25b6 \u8ffd\u6740</button><button class="btn btn-sm htyq-bloodfeud-end" data-idx="'+bi+'" style="font-size:9px;padding:1px 5px;color:#f85149;">\u2716 \u7ec8\u7ed3</button></span></div>';
+        html += '<div class="sm gray" style="margin-bottom:3px;"><span style="color:#f85149;font-weight:600;">'+esc(bf[bi].faction)+'</span> \u2014 '+esc(bf[bi].reason||'')+'\uff08'+esc(bf[bi].status||'')+'\uff09</div>';
       }
     } else { html += '<div class="sm gray">\u6682\u65e0\u8840\u4ec7\u8bb0\u5f55</div>'; }
     html += '</div><div class="card" style="flex:1;"><div class="card-title">\ud83d\udd17 \u56e0\u679c\u94fe</div>';
@@ -1764,12 +961,7 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
     if (evts.length) {
       for (var evi = 0; evi < evts.length; evi++) {
         var ev = evts[evi];
-        var pct = (ev.totalRounds||1) > 0 ? Math.round(((ev.currentRound||0) / (ev.totalRounds||1)) * 100) : 0;
-        var barClr = pct < 30 ? '#f85149' : pct < 70 ? '#d29922' : '#238636';
-        html += '<div style="margin-bottom:5px;padding:6px 10px;background:#0d1117;border-radius:6px;border:1px solid #21262d;">';
-        html += '<div class="flex-sb" style="align-items:center;"><span><span style="color:#d29922;">['+esc(ev.stage||'\u8fdb\u884c\u4e2d')+']</span> <span style="font-weight:500;font-size:11.5px;">'+esc(ev.name)+'</span> <span class="gray">Lv.'+(ev.level||1)+'</span></span><span class="flex" style="gap:2px;"><button class="btn btn-sm htyq-event-advance" data-ev-name="'+esc(ev.name)+'" style="font-size:9px;padding:1px 5px;">\u25b6 \u63a8\u8fdb</button><button class="btn btn-sm htyq-event-edit" data-ev-name="'+esc(ev.name)+'" style="font-size:9px;padding:1px 5px;">\u270e</button><button class="btn btn-sm htyq-event-del" data-ev-name="'+esc(ev.name)+'" style="font-size:9px;padding:1px 5px;color:#f85149;">\u2716</button></span></div>';
-        html += '<div style="margin-top:5px;display:flex;align-items:center;gap:6px;"><div style="flex:1;height:5px;background:#21262d;border-radius:3px;overflow:hidden;"><div style="height:100%;width:'+pct+'%;background:'+barClr+';border-radius:3px;transition:width 0.3s;"></div></div><span class="sm gray" style="white-space:nowrap;">'+(ev.currentRound||0)+'/'+(ev.totalRounds||1)+'</span></div>';
-        html += '</div>';
+        html += '<div class="sm gray" style="margin-bottom:3px;display:flex;justify-content:space-between;align-items:center;"><span><span style="color:#d29922;">['+esc(ev.stage||'\u8fdb\u884c\u4e2d')+']</span> <span style="font-weight:500;">'+esc(ev.name)+'</span> <span class="gray">Lv.'+(ev.level||1)+' '+(ev.currentRound||0)+'/'+(ev.totalRounds||1)+'</span></span><button class="btn btn-sm htyq-event-advance" data-ev-name="'+esc(ev.name)+'">\u25b6 \u63a8\u8fdb</button></div>';
       }
     } else { html += '<div class="sm gray">\u6682\u65e0\u5173\u952e\u56e0\u679c</div>'; }
     html += '<div class="fa mt-8"><button class="btn btn-sm" id="htyq-create-event">\u2795 \u521b\u5efa\u4e8b\u4ef6</button></div></div></div>';
@@ -1797,7 +989,7 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
       html += '<div class="tl">';
       for (var rmi = Math.max(0, rumors.length - 5); rmi < rumors.length; rmi++) {
         var rm = rumors[rmi];
-        html += '<div class="tl-i" style="display:flex;justify-content:space-between;align-items:center;"><div class="txt">\ud83d\udcac '+(rm.round?'#'+rm.round+': ':'')+esc(rm.text||rm.content||'')+'</div><button class="btn btn-sm htyq-rumor-edit-btn" data-idx="'+rmi+'" style="font-size:9px;padding:0 4px;">\u270e</button></div>';
+        html += '<div class="tl-i"><div class="txt">\ud83d\udcac '+(rm.round?'#'+rm.round+': ':'')+esc(rm.text||rm.content||'')+'</div></div>';
       }
       html += '</div>';
     } else {
@@ -1812,7 +1004,7 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
       html += '<div class="tl">';
       for (var cci = 0; cci < causalChain.length; cci++) {
         var cc = causalChain[cci];
-        html += '<div class="tl-i" style="display:flex;justify-content:space-between;align-items:center;"><div class="txt">'+(cc.round?'#'+cc.round+': ':'')+esc(cc.cause||'')+' \u2192 '+esc(cc.effect||'')+'</div><button class="btn btn-sm htyq-causal-edit" data-idx="'+cci+'" style="font-size:9px;padding:0 4px;">\u270e</button></div>';
+        html += '<div class="tl-i"><div class="txt">'+(cc.round?'#'+cc.round+': ':'')+esc(cc.cause||'')+' \u2192 '+esc(cc.effect||'')+'</div></div>';
       }
       html += '</div>';
     } else {
@@ -2014,220 +1206,6 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
           if (wlSection) wlSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }, 100);
       });
-
-      // faction edit/delete
-      document.querySelectorAll('.htyq-faction-edit').forEach(function(btn){
-        btn.addEventListener('click', function(){
-          var idx = parseInt(this.getAttribute('data-idx'));
-          if (isNaN(idx)) return;
-          var st = core.loadState();
-          var facs = st.factions || [];
-          if (idx < 0 || idx >= facs.length) return;
-          var f = facs[idx];
-          var name = prompt('\u4fee\u6539\u52bf\u529b\u540d\u79f0\uff1a', f.name);
-          if (!name) return;
-          var cohesion = prompt('\u51dd\u805a\u529b\uff08\u56e2\u7ed3/\u677e\u6563/\u5206\u88c2\uff09\uff1a', f.cohesion||'\u56e2\u7ed3');
-          if (!cohesion) return;
-          var resources = prompt('\u8d44\u6e90\uff08\u5145\u8db3/\u7d27\u5f20/\u67af\u7aed\uff09\uff1a', f.resources||'\u5145\u8db3');
-          if (!resources) return;
-          f.name = name;
-          f.cohesion = cohesion;
-          f.resources = resources;
-          f.goal = prompt('\u5f53\u524d\u76ee\u6807\uff1a', f.goal||'') || f.goal;
-          f.attitude = prompt('\u5bf9\u4f60\u7684\u6001\u5ea6\uff08\u65e0/\u89c2\u5bdf/\u62c9\u62e2/\u6392\u65a5\uff09\uff1a', f.attitude||'\u65e0') || f.attitude;
-          core.saveState(st);
-          toast('\u2705 \u5df2\u66f4\u65b0\u52bf\u529b\uff1a' + name);
-          refresh();
-        });
-      });
-      document.querySelectorAll('.htyq-faction-del').forEach(function(btn){
-        btn.addEventListener('click', function(){
-          var idx = parseInt(this.getAttribute('data-idx'));
-          if (isNaN(idx)) return;
-          var st = core.loadState();
-          if (!st.factions || idx < 0 || idx >= st.factions.length) return;
-          var name = st.factions[idx].name;
-          if (!confirm('\u786e\u5b9a\u5220\u9664\u52bf\u529b\u300c' + name + '\u300d\uff1f')) return;
-          st.factions.splice(idx, 1);
-          core.saveState(st);
-          toast('\u2705 \u5df2\u5220\u9664\u52bf\u529b\uff1a' + name);
-          refresh();
-        });
-      });
-
-      // event edit/delete
-      document.querySelectorAll('.htyq-event-edit').forEach(function(btn){
-        btn.addEventListener('click', function(){
-          var evName = this.getAttribute('data-ev-name');
-          if (!evName) return;
-          var st = core.loadState();
-          var evts = st.events || [];
-          var idx = -1;
-          for (var ei = 0; ei < evts.length; ei++) {
-            if (evts[ei].name === evName) { idx = ei; break; }
-          }
-          if (idx === -1) return;
-          var ev = evts[idx];
-          var name = prompt('\u4e8b\u4ef6\u540d\u79f0\uff1a', ev.name);
-          if (!name) return;
-          var stage = prompt('\u9636\u6bb5\uff08\u8404\u82bd/\u53d1\u9175/\u903c\u8fd1/\u5df2\u7206\u53d1/\u4f59\u6ce2\uff09\uff1a', ev.stage||'\u53d1\u9175');
-          if (!stage) return;
-          var totalRounds = parseInt(prompt('\u603b\u8f6e\u6570\uff083-8\uff09\uff1a', ev.totalRounds||3));
-          if (isNaN(totalRounds) || totalRounds < 1) totalRounds = 3;
-          ev.name = name;
-          ev.stage = stage;
-          ev.totalRounds = totalRounds;
-          ev.desc = prompt('\u63cf\u8ff0\uff1a', ev.desc||'') || ev.desc;
-          core.saveState(st);
-          toast('\u2705 \u5df2\u66f4\u65b0\u4e8b\u4ef6\uff1a' + name);
-          refresh();
-        });
-      });
-      document.querySelectorAll('.htyq-event-del').forEach(function(btn){
-        btn.addEventListener('click', function(){
-          var evName = this.getAttribute('data-ev-name');
-          if (!evName) return;
-          if (!confirm('\u786e\u5b9a\u5220\u9664\u4e8b\u4ef6\u300c' + evName + '\u300d\uff1f')) return;
-          var st = core.loadState();
-          if (!st.events) return;
-          st.events = st.events.filter(function(e) { return e.name !== evName; });
-          core.saveState(st);
-          toast('\u2705 \u5df2\u5220\u9664\u4e8b\u4ef6\uff1a' + evName);
-          refresh();
-        });
-      });
-
-      // blood feud management
-      document.querySelectorAll('.htyq-bloodfeud-advance').forEach(function(btn){
-        btn.addEventListener('click', function(){
-          var idx = parseInt(this.getAttribute('data-idx'));
-          if (isNaN(idx)) return;
-          var st = core.loadState();
-          if (!st.bloodFeudMemo || idx < 0 || idx >= st.bloodFeudMemo.length) return;
-          var bf = st.bloodFeudMemo[idx];
-          bf.status = '\u8ffd\u6740\u4e2d';
-          bf.attackCount = (bf.attackCount || 0) + 1;
-          bf.lastActionRound = st.round;
-          bf.nextAttackRound = st.round + Math.floor(Math.random() * 6) + 5;
-          core.saveState(st);
-          toast('\u2705 \u5df2\u89e6\u53d1\u8840\u4ec7\u8ffd\u6740\uff1a' + bf.faction);
-          refresh();
-        });
-      });
-      document.querySelectorAll('.htyq-bloodfeud-end').forEach(function(btn){
-        btn.addEventListener('click', function(){
-          var idx = parseInt(this.getAttribute('data-idx'));
-          if (isNaN(idx)) return;
-          if (!confirm('\u786e\u5b9a\u7ec8\u7ed3\u6b64\u8840\u4ec7\uff1f')) return;
-          var st = core.loadState();
-          if (!st.bloodFeudMemo || idx < 0 || idx >= st.bloodFeudMemo.length) return;
-          st.bloodFeudMemo[idx].status = '\u5df2\u7ec8\u7ed3';
-          core.saveState(st);
-          toast('\u2705 \u8840\u4ec7\u5df2\u7ec8\u7ed3');
-          refresh();
-        });
-      });
-      document.querySelectorAll('.htyq-bloodfeud-create').forEach(function(btn){
-        btn.addEventListener('click', function(){
-          var faction = prompt('\u8f93\u5165\u52bf\u529b\u540d\uff08\u7ed3\u4e0b\u8840\u4ec7\u7684\u52bf\u529b\uff09\uff1a');
-          if (!faction) return;
-          var reason = prompt('\u8840\u4ec7\u539f\u56e0\uff1a');
-          if (!reason) return;
-          var st = core.loadState();
-          if (!st.bloodFeudMemo) st.bloodFeudMemo = [];
-          st.bloodFeudMemo.push({ faction: faction, reason: reason, status: '\u8ffd\u8e2a\u4e2d', attackCount: 0, lastActionRound: st.round, nextAttackRound: st.round + 8 });
-          core.saveState(st);
-          toast('\u2705 \u5df2\u521b\u5efa\u8840\u4ec7\uff1a' + faction);
-          refresh();
-        });
-      });
-
-      // economy edit
-      document.querySelectorAll('.htyq-eco-edit').forEach(function(btn){
-        btn.addEventListener('click', function(){
-          var field = this.getAttribute('data-field');
-          var st = core.loadState();
-          if (!st.economy) st.economy = {};
-          var curVal = st.economy[field] || '';
-          if (field === 'keyResources') curVal = (st.economy.keyResources||[]).join(', ');
-          var val = prompt('\u4fee\u6539 ' + (field === 'marketTrend' ? '\u5e02\u573a\u8d8b\u52bf' : field === 'fundsStatus' ? '\u8d44\u91d1\u72b6\u51b5' : '\u5173\u952e\u8d44\u6e90') + '\uff08\u5f53\u524d\uff1a' + curVal + '\uff09\uff1a', curVal);
-          if (val === null) return;
-          if (field === 'keyResources') st.economy.keyResources = val.split(/[,\u3001\s]+/).filter(function(s){return s.trim();});
-          else st.economy[field] = val.trim();
-          core.saveState(st);
-          toast('\u2705 \u7ecf\u6d4e\u72b6\u51b5\u5df2\u66f4\u65b0');
-          refresh();
-        });
-      });
-
-      // faction relations
-      document.querySelectorAll('.htyq-facrel-create').forEach(function(btn){
-        btn.addEventListener('click', function(){
-          var from = prompt('\u8f93\u5165\u6e90\u52bf\u529b\u540d\uff1a');
-          if (!from) return;
-          var to = prompt('\u8f93\u5165\u76ee\u6807\u52bf\u529b\u540d\uff1a');
-          if (!to) return;
-          var type = prompt('\u5173\u7cfb\u7c7b\u578b\uff08\u76df\u53cb/\u4e2d\u7acb/\u654c\u5bf9/\u76d1\u89c6/\u8d28\u5b50/\u7ecf\u8d38/\u8840\u76df/\u4e16\u4ec7\uff09\uff1a', '\u4e2d\u7acb');
-          if (!type) return;
-          var st = core.loadState();
-          if (!st.factionRelations) st.factionRelations = [];
-          st.factionRelations.push({ from: from, to: to, type: type, trend: '\u5e73\u7a33' });
-          core.saveState(st);
-          toast('\u2705 \u5df2\u6dfb\u52a0\u52bf\u529b\u5173\u7cfb\uff1a' + from + ' \u2192 ' + to);
-          refresh();
-        });
-      });
-      document.querySelectorAll('.htyq-facrel-del').forEach(function(btn){
-        btn.addEventListener('click', function(){
-          var idx = parseInt(this.getAttribute('data-idx'));
-          if (isNaN(idx)) return;
-          var st = core.loadState();
-          if (!st.factionRelations || idx < 0 || idx >= st.factionRelations.length) return;
-          if (!confirm('\u786e\u5b9a\u5220\u9664\u8be5\u52bf\u529b\u5173\u7cfb\uff1f')) return;
-          st.factionRelations.splice(idx, 1);
-          core.saveState(st);
-          toast('\u2705 \u52bf\u529b\u5173\u7cfb\u5df2\u5220\u9664');
-          refresh();
-        });
-      });
-
-      // causal chain edit
-      document.querySelectorAll('.htyq-causal-edit').forEach(function(btn){
-        btn.addEventListener('click', function(){
-          var idx = parseInt(this.getAttribute('data-idx'));
-          if (isNaN(idx)) return;
-          var st = core.loadState();
-          if (!st.causalChain || idx < 0 || idx >= st.causalChain.length) return;
-          var cc = st.causalChain[idx];
-          var cause = prompt('\u4fee\u6539\u539f\u56e0\uff1a', cc.cause||'');
-          if (cause === null) return;
-          var effect = prompt('\u4fee\u6539\u7ed3\u679c\uff1a', cc.effect||'');
-          if (effect === null) return;
-          cc.cause = cause;
-          cc.effect = effect;
-          core.saveState(st);
-          toast('\u2705 \u56e0\u679c\u94fe\u5df2\u66f4\u65b0');
-          refresh();
-        });
-      });
-
-      // rumor edit
-      document.querySelectorAll('.htyq-rumor-edit-btn').forEach(function(btn){
-        btn.addEventListener('click', function(){
-          var idx = parseInt(this.getAttribute('data-idx'));
-          if (isNaN(idx)) return;
-          var st = core.loadState();
-          if (!st.rumors || idx < 0 || idx >= st.rumors.length) return;
-          var rm = st.rumors[idx];
-          var text = prompt('\u4fee\u6539\u8c23\u8a00\u5185\u5bb9\uff1a', rm.text||rm.content||'');
-          if (!text) return;
-          rm.text = text;
-          delete rm.content;
-          core.saveState(st);
-          toast('\u2705 \u8c23\u8a00\u5df2\u66f4\u65b0');
-          refresh();
-        });
-      });
     }, 50);
   }
 
@@ -2244,7 +1222,7 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
     html += '<div class="flex"><input type="text" id="htyq-mem-search" placeholder="\u641c\u7d22\u8bb0\u5fc6..." style="padding:4px 8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:11px;width:140px;">';
     html += '<select id="htyq-mem-filter" style="padding:4px 8px;background:#21262d;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:11px;"><option>\u5168\u90e8</option><option>\u70ed\u8bb0\u5fc6</option><option>\u51b7\u8bb0\u5fc6</option></select></div></div>';
     html += '<div class="save-bar"><div class="hint">\ud83d\udcdd \u81ea\u5b9a\u4e49\u5b9e\u4f53</div>';
-    html += '<div class="flex"><input type="text" id="htyq-mem-custom-entities" placeholder="\u8f93\u5165\u81ea\u5b9a\u4e49\u5b9e\u4f53\u540d\u79f0..." style="flex:1;padding:4px 8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:11px;">';
+    html += '<div class="flex"><input type="text" id="htyq-custom-entities" placeholder="\u8f93\u5165\u81ea\u5b9a\u4e49\u5b9e\u4f53\u540d\u79f0..." style="flex:1;padding:4px 8px;background:#0d1117;border:1px solid #30363d;border-radius:4px;color:#e6edf3;font-size:11px;">';
     html += '<button class="btn btn-sm" id="htyq-save-custom-entities">\u2795 \u6dfb\u52a0</button></div></div>';
     html += '<div class="save-bar" style="justify-content:flex-end;"><button class="btn btn-sm" id="htyq-add-memory">\u2795 \u624b\u52a8\u6dfb\u52a0\u8bb0\u5fc6</button></div>';
 
@@ -2293,7 +1271,7 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
     var memConfig = state.memConfig || state.storageConfig || {};
     var hotThreshold = memConfig.hotRoundThreshold || 50;
     var archiveThreshold = memConfig.archiveImportance || 2;
-    html += '<div class="flex"><span class="gray">\u70ed\u8bb0\u5fc6\u8f6e\u6570\u9608\u503c\uff1a</span><input type="number" class="htyq-threshold-input" id="htyq-mem-hot-threshold" value="'+hotThreshold+'" min="1" max="999"></div>';
+    html += '<div class="flex"><span class="gray">\u70ed\u8bb0\u5fc6\u8f6e\u6570\u9608\u503c\uff1a</span><input type="number" class="htyq-threshold-input" id="htyq-hot-threshold" value="'+hotThreshold+'" min="1" max="999"></div>';
     html += '<div class="flex"><span class="gray">\u81ea\u52a8\u5f52\u6863\u91cd\u8981\u6027\uff1a</span><input type="number" class="htyq-threshold-input" id="htyq-archive-threshold" value="'+archiveThreshold+'" min="1" max="10"></div>';
     html += '<div class="fa"><button class="btn btn-sm btn-primary" id="htyq-save-thresholds" style="font-size:10px;padding:2px 8px;">\ud83d\udcbe \u4fdd\u5b58\u9608\u503c</button></div></div></div>';
 
@@ -2621,39 +1599,6 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
     if (!evLog.length) html += '<div>\u6682\u65e0\u6f14\u5316\u65e5\u5fd7</div>';
     html += '</div></div>';
 
-    // time logs (from core.addTimeLog)
-    var timeLogs = state.timeLogs || [];
-    html += '<div class="card-title" style="margin-top:12px;">\u23f1 \u65f6\u95f4\u53d8\u66f4\u8bb0\u5f55 <span class="bdg">'+timeLogs.length+'</span></div>';
-    html += '<div style="background:#0d1117;border-radius:6px;padding:8px;border:1px solid #21262d;max-height:100px;overflow-y:auto;font-size:10.5px;color:#8b949e;">';
-    if (timeLogs.length) {
-      for (var tli = Math.max(0, timeLogs.length-8); tli < timeLogs.length; tli++) {
-        var tl = timeLogs[tli];
-        html += '<div style="margin-bottom:2px;">#'+ (tl.round||'?') +' \u00b7 '+esc(tl.time||'')+' \u00b7 '+esc(tl.remark||tl.change||'')+'</div>';
-      }
-    } else {
-      html += '<div>\u6682\u65e0\u65f6\u95f4\u53d8\u66f4\u8bb0\u5f55</div>';
-    }
-    html += '</div></div>';
-
-    // v3.0.2: Combo counter + evolution progress
-    var combos = state.comboHistory || [];
-    var maxCombo = 0, currentStreak = 0;
-    combos.forEach(function(c){ if ((c.combo||0) > maxCombo) maxCombo = c.combo; });
-    if (combos.length > 0) {
-      var lastC = combos[combos.length-1];
-      if (lastC.active) currentStreak = lastC.combo || 0;
-    }
-    html += '<div class="card"><div class="card-title">\ud83d\udca5 \u8fde\u51fb\u8ba1\u6570 <span class="bdg">\u5f53\u524d\u8fde\u51fb '+(currentStreak||'0')+ ' \u00b7 \u6700\u9ad8 '+(maxCombo||'0')+'</span></div>';
-    html += '<div style="display:flex;gap:10px;align-items:center;">';
-    html += '<div style="flex:1;display:flex;gap:4px;">';
-    for (var ci = 0; ci < (maxCombo||5); ci++) {
-      var filled = ci < currentStreak;
-      html += '<div style="flex:1;height:12px;border-radius:4px;background:'+(filled?'#d29922':'#21262d')+';transition:all 0.3s;border:1px solid '+(filled?'#d29922':'#30363d')+';" title="'+(ci+1)+'"></div>';
-    }
-    html += '</div>';
-    html += '<button class="btn btn-sm" id="htyq-combo-reset" style="flex-shrink:0;">\ud83d\udd04 \u91cd\u7f6e\u8fde\u51fb</button>';
-    html += '</div></div>';
-
     cont.innerHTML = html;
 
     // bind events
@@ -2817,19 +1762,6 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
           refresh();
         });
       }
-      // v3.0.2: combo reset
-      var comboReset = document.getElementById('htyq-combo-reset');
-      if (comboReset) {
-        comboReset.addEventListener('click', function(){
-          var st2 = core.loadState();
-          if (st2.comboHistory) {
-            st2.comboHistory.forEach(function(c){ c.active = false; });
-          }
-          core.saveState(st2);
-          toast('\ud83d\udd04 \u8fde\u51fb\u5df2\u91cd\u7f6e');
-          refresh();
-        });
-      }
     }, 50);
   }
 
@@ -2931,34 +1863,6 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
     html += '<div style="background:#0d1117;border-radius:6px;padding:8px;border:1px solid #21262d;font-size:11px;color:#e6edf3;">';
     html += '<div class="sm gray">\u5206\u6790\u7ed3\u679c\uff1a</div><div class="sm" style="color:#e6edf3;margin-top:2px;">'+(state.worldDigest||'\u6682\u65e0\u5206\u6790\u7ed3\u679c')+'</div></div>';
     html += '<div class="fa"><button class="btn" id="htyq-analyze">\ud83d\udd04 \u91cd\u65b0\u5206\u6790</button></div></div>';
-
-    // v3.0.2: Chapter / Volume progress visualization
-    var chapters = state.chapterSummaries || [];
-    var volumes = state.volumeSummaries || [];
-    html += '<div class="card"><div class="card-title">\ud83d\udcd6 \u7ae0\u8282 / \u5377 \u8fdb\u5ea6 <span class="bdg">'+(chapters.length||0)+' \u7ae0 \u00b7 '+(volumes.length||0)+' \u5377</span></div>';
-    if (chapters.length) {
-      for (var cii = Math.max(0, chapters.length-5); cii < chapters.length; cii++) {
-        var ch = chapters[cii];
-        html += '<div style="margin-bottom:4px;padding:4px 8px;border-left:3px solid #238636;background:#0d1117;border-radius:4px;">';
-        html += '<div style="display:flex;justify-content:space-between;font-size:11px;"><span style="font-weight:600;">#'+(cii+1)+'</span><span class="gray">Round '+(ch.round||'?')+'</span></div>';
-        html += '<div class="sm gray" style="font-size:10px;">'+esc(ch.summary||ch.text||'')+'</div></div>';
-      }
-    }
-    if (volumes.length) {
-      html += '<div style="margin-top:6px;display:flex;gap:6px;">';
-      for (var vii = 0; vii < volumes.length; vii++) {
-        var vs = volumes[vii];
-        var isLatest = vii === volumes.length - 1;
-        html += '<div style="flex:1;padding:4px 6px;background:'+(isLatest?'#1a2330':'#0d1117')+';border-radius:4px;border:1px solid '+(isLatest?'#238636':'#21262d')+';text-align:center;">';
-        html += '<div style="font-size:14px;font-weight:700;">'+esc(vs.volume||'V'+(vii+1))+'</div>';
-        html += '<div class="sm gray" style="font-size:9px;">'+esc(vs.summary||'')+'</div></div>';
-      }
-      html += '</div>';
-    }
-    if (!chapters.length && !volumes.length) {
-      html += '<div class="sm gray">\u5c1a\u65e0\u7ae0\u8282\u6216\u5377\u8bb0\u5f55</div>';
-    }
-    html += '</div>';
 
     cont.innerHTML = html;
 
@@ -3347,9 +2251,9 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
         renderAllBookEntries();
       }
 
-      // ========== guard: 绑定只跑一次 ==========
-      if (window._htyq_wb_events_bound) return;
-      window._htyq_wb_events_bound = true;
+      // ========== guard: \u7ed1\u5b9a\u53ea\u8dd1\u4e00\u6b21\uff08\u5143\u7d20\u7ea7\u4e8b\u4ef6\u6bcf\u6b21\u91cd\u65b0\u7ed1\uff0c\u56e0\u4e3ainnerHTML\u66ff\u6362\u4e86\u65e7DOM\u5143\u7d20\uff09==========
+      // \u4ec5\u9632\u6b62 document \u7ea7\u59d4\u6258\u4e8b\u4ef6\u5806\u79ef
+      var _htyq_wb_no_rebind = window._htyq_wb_doc_bound;
 
       var actSel = document.getElementById('htyq-wb-activate-selected');
       if (actSel) {
@@ -3447,6 +2351,8 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
       }
 
       // \u6761\u76ee\u62d8\u53e0\u5207\u6362\uff1a\u70b9\u51fb\u6807\u9898\u680f\u5c55\u5f00/\u6536\u8d77
+      if (!_htyq_wb_no_rebind) {
+        window._htyq_wb_doc_bound = true;
       document.addEventListener('click', function(e) {
         var header = e.target.closest('.wb-book-header');
         if (header) {
@@ -3490,6 +2396,7 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
           return;
         }
       });
+      }
 
       // \u4fdd\u5b58\u5168\u90e8\u6761\u76ee\u9009\u62e9
       var saveWbE = document.getElementById('htyq-save-wb-entries');
@@ -3581,12 +2488,12 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
         });
       }
 
-      // \u521d\u59cb\u52a0\u8f7d\uff1a\u5148\u57fa\u4e8e\u5f53\u524d localStorage \u7acb\u523b\u6e32\u67d3\uff0c\u7b49\u4e0b\u62c9\u6846\u52a0\u8f7d\u5b8c\u518d\u6b21\u6e32\u67d3
-      renderAllBookEntries();
-      loadWbDropdown().then(function() {
-        renderAllBookEntries();
-      });
     }, 50);
+    // \u521d\u59cb\u52a0\u8f7d\uff08\u653e\u5b88\u536b\u5916\uff0c\u6bcf\u6b21\u5237\u65b0 Tab \u90fd\u6267\u884c\uff09
+    renderAllBookEntries();
+    loadWbDropdown().then(function() {
+      renderAllBookEntries();
+    });
   }
 
   /* ═══════════════════ SETTINGS ═══════════════════ */
@@ -3598,38 +2505,22 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
     html += '<button class="btn btn-success" id="htyq-save-all">\ud83d\udcbe \u4fdd\u5b58\u5168\u90e8\u8bbe\u7f6e</button></div>';
 
     // API
-    html += '<div class="card"><div class="card-title">🔌 API 连接 <span class="bdg">必须配置</span></div>';
-    var apiMode = settings.apiMode || 'tavern';
-    var isCustom = apiMode === 'custom';
-    // 模式选择
-    html += '<div class="fa" style="gap:16px;"><label style="font-size:12px;cursor:pointer;"><input type="radio" name="htyq-api-mode" value="tavern"'+(!isCustom?' checked':'')+'> ▶ ST 内部接口（使用酒馆已有配置）</label>';
-    html += '<label style="font-size:12px;cursor:pointer;"><input type="radio" name="htyq-api-mode" value="custom"'+(isCustom?' checked':'')+'> ▶ 自定义路由</label></div>';
-    // 说明
-    html += '<div style="font-size:10px;color:#8b949e;margin:4px 0 8px;padding:6px 10px;background:#0d1117;border-radius:6px;">';
-    html += isCustom ? '✅ 自定义模式：填下面信息后点测试连接，模型列表会自动加载并可选择' : 'ℹ️ ST 内部接口直接使用酒馆已配置的 API 和模型，下方字段无需填写';
-    html += '</div><div id="htyq-api-fields">';
-    html += '<div class="fr"><div class="fg"><label>API 地址</label><input type="url" id="htyq-api-url" value="'+esc(settings.apiUrl||'')+'"'+(isCustom?'':' disabled')+'></div>';
-    html += '<div class="fg"><label>API Key</label><input type="password" id="htyq-api-key" value="'+(settings.apiKey||'')+'"'+(isCustom?'':' disabled')+'></div></div>';
-    // 模型字段：custom 用 <select>，tavern 用 disabled
-    if (isCustom) {
-      var savedM = esc(settings.apiModel||'');
-      html += '<div class="fg"><label>模型名称</label><select id="htyq-api-model" style="width:100%;padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:12px;">';
-      if (savedM) { html += '<option value="'+savedM+'" selected>'+savedM+'</option>'; }
-      html += '<option value="">— 请点测试连接加载模型 —</option>';
-      html += '</select></div>';
-    } else {
-      html += '<div class="fg"><label>模型名称</label><input type="text" id="htyq-api-model" value="— 已使用 ST 内部设置 —" disabled style="color:#8b949e;"></div>';
-    }
-    html += '</div>';
-    html += '<div class="fa"><button class="btn btn-primary" id="htyq-save-api">💾 保存 API 设置</button>';
-    html += '<button class="btn btn-success" id="htyq-test-api">🔌 测试连接</button></div></div>';
-// general
+    html += '<div class="card"><div class="card-title">\ud83d\udd0c API \u8fde\u63a5 <span class="bdg">\u5fc5\u987b\u914d\u7f6e</span></div><div class="fr">';
+    html += '<div class="fg"><label>API \u7c7b\u578b</label><select id="htyq-api-type">';
+    ['OpenAI (ChatGPT)','KoboldCPP','TextGen WebUI (Ooba)','Claude API','\u81ea\u5b9a\u4e49'].forEach(function(t){ html += '<option'+(t==='KoboldCPP'?' selected':'')+'>'+t+'</option>'; });
+    html += '</select></div>';
+    html += '<div class="fg"><label>API \u5730\u5740</label><input type="url" id="htyq-api-url" value="'+esc(settings.apiUrl||'http://localhost:5001/api')+'"></div></div>';
+    html += '<div class="fr"><div class="fg"><label>API Key</label><input type="password" id="htyq-api-key" value="'+(settings.apiKey||'')+'"></div>';
+    html += '<div class="fg"><label>\u6a21\u578b\u540d\u79f0</label><input type="text" id="htyq-api-model" value="'+esc(settings.apiModel||'deepseek-v4')+'"></div></div>';
+    html += '<div class="fa"><button class="btn btn-primary" id="htyq-save-api">\ud83d\udcbe \u4fdd\u5b58 API \u8bbe\u7f6e</button>';
+    html += '<button class="btn btn-success" id="htyq-test-api">\ud83d\udd0c \u6d4b\u8bd5\u8fde\u63a5</button></div></div>';
+
+    // general
     html += '<div class="card"><div class="card-title">\u2699\ufe0f \u901a\u7528\u8bbe\u7f6e</div><div class="fr">';
     html += '<div class="fg"><label>\u8bed\u8a00</label><select id="htyq-lang"><option selected>\u4e2d\u6587</option><option>English</option><option>\u65e5\u672c\u8a9e</option></select></div>';
     html += '<div class="fg"><label>\u6210\u5c31\u901a\u77e5</label><select id="htyq-ach-notify"><option selected>\u5168\u90e8\u901a\u77e5</option><option>\u4ec5\u7a00\u6709\u53ca\u4ee5\u4e0a</option><option>\u5173\u95ed</option></select></div></div>';
     html += '<div class="flex"><span class="tw"><label class="tg"><input type="checkbox" id="htyq-auto-load" checked><span class="s"></span></label><span class="sm">\u542f\u52a8\u65f6\u81ea\u52a8\u52a0\u8f7d\u4e16\u754c\u72b6\u6001</span></span>';
     html += '<span class="tw"><label class="tg"><input type="checkbox" id="htyq-nsfw-ach"><span class="s"></span></label><span class="sm">\u663e\u793a NSFW \u6210\u5c31</span></span></div>';
-    html += '<div class="fg"><label>\u81ea\u5b9a\u4e49\u5b9e\u4f53\u5217\u8868\uff08\u9017\u53f7\u5206\u9694\uff09</label><textarea id="htyq-custom-entities" rows="2" placeholder="\u4f8b\u5982\uff1a\u5f20\u4e09,\u674e\u56db,\u5929\u673a\u9601,\u9752\u77f3\u5173">'+esc(settings.customEntities||'')+'</textarea></div>';
     html += '<div class="fa"><button class="btn btn-primary" id="htyq-save-general">\ud83d\udcbe \u4fdd\u5b58\u901a\u7528\u8bbe\u7f6e</button></div></div>';
 
     // data & storage
@@ -3638,21 +2529,13 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
     html += '<div class="fg"><label>\u81ea\u52a8\u5907\u4efd\u95f4\u9694</label><select id="htyq-backup-interval"><option>\u6bcf 5 \u8f6e</option><option selected>\u6bcf 10 \u8f6e</option><option>\u6bcf 20 \u8f6e</option><option>\u5173\u95ed</option></select></div></div>';
     html += '<div class="fr"><div class="fg"><label>\u6700\u5927\u8bb0\u5fc6\u6570\u91cf</label><input type="number" id="htyq-max-memory" value="500"></div>';
     html += '<div class="fg"><label>AI \u81ea\u52a8\u6210\u5c31\u751f\u6210</label><select id="htyq-auto-ach"><option selected>\u5f00\u542f\uff08\u6700\u591a 50 \u4e2a\uff09</option><option>\u5173\u95ed</option></select></div></div>';
-    html += '<div class="fr"><div class="fg"><label>\u70ed\u8bb0\u5fc6\u91cd\u8981\u6027\u9608\u503c</label><input type="number" id="htyq-hot-importance" value="2" min="0" max="10"></div>';
-    html += '<div class="fg"><label>AI \u6210\u5c31\u4e0a\u9650</label><input type="number" id="htyq-ach-limit" value="50" min="1" max="500"></div></div>';
-    html += '<div class="fr"><div class="fg"><label>\u6f14\u5316\u91cd\u8bd5\u6b21\u6570</label><input type="number" id="htyq-retry-count" value="1" min="0" max="5"></div>';
-    html += '<div class="fg flex" style="align-items:flex-end;gap:8px;"><label style="white-space:nowrap;">\u4e25\u683c\u6a21\u5f0f</label><label class="tg"><input type="checkbox" id="htyq-strict-evolve" '+(settings.strictEvolution!==false?'checked':'')+'><span class="s"></span></label></div></div>';
     html += '<div class="fa"><button class="btn btn-primary" id="htyq-save-storage">\ud83d\udcbe \u4fdd\u5b58\u5b58\u50a8\u8bbe\u7f6e</button>';
     html += '<button class="btn btn-success" id="htyq-export-snapshot">\ud83d\udce6 \u5bfc\u51fa\u5feb\u7167</button>';
     html += '<button class="btn" id="htyq-import-snapshot">\ud83d\udce5 \u5bfc\u5165\u5feb\u7167</button></div>';
     html += '<div class="hr"></div>';
     var autoBackups = []; try { autoBackups = JSON.parse(localStorage.getItem('htyq_auto_backups') || '[]'); } catch(e) {}
     var lastBakRound = autoBackups.length > 0 ? autoBackups[autoBackups.length - 1].round || '\u65e0' : '\u65e0';
-    html += '<div class="flex"><span class="sm gray">\u6700\u8fd1\u5feb\u7167\uff1a' + autoBackups.length + ' \u4e2a\u4fdd\u5b58\u70b9</span><span class="sm gray">\u6700\u540e\u5907\u4efd\uff1a\u7b2c ' + lastBakRound + ' \u8f6e</span></div>';
-    // savepoint manager
-    html += '<div class="hr"></div><div id="htyq-savepoint-section"><div class="card-title" style="font-size:12px;margin-bottom:6px;">\ud83d\uddd2\ufe0f \u4fdd\u5b58\u70b9\u7ba1\u7406</div>';
-    html += '<div class="flex" style="gap:4px;flex-wrap:wrap;"><button class="btn btn-sm btn-primary" id="htyq-sp-create">\ud83d\udcbe \u624b\u52a8\u521b\u5efa\u4fdd\u5b58\u70b9</button><button class="btn btn-sm" id="htyq-sp-list">\ud83d\udcca \u67e5\u770b\u4fdd\u5b58\u70b9\u5217\u8868</button><button class="btn btn-sm btn-danger" id="htyq-sp-clear">\ud83d\uddd1\ufe0f \u6e05\u9664\u5168\u90e8</button></div>';
-    html += '<div id="htyq-sp-list-container" style="margin-top:6px;display:none;"></div></div>';
+    html += '<div class="flex"><span class="sm gray">\u6700\u8fd1\u5feb\u7167\uff1a' + autoBackups.length + ' \u4e2a\u4fdd\u5b58\u70b9</span><span class="sm gray">\u6700\u540e\u5907\u4efd\uff1a\u7b2c ' + lastBakRound + ' \u8f6e</span></div></div>';
 
     // \u9884\u8bbe\u7ba1\u7406
     var currentPreset = JSON.parse(localStorage.getItem('htyq_lite_settings')||'{}').activePreset||'\u6807\u51c6\u9884\u8bbe';
@@ -3674,16 +2557,11 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
     ];
     var wlDims = wl.dimensions || {};
 
-    html += '<div class="card" id="htyq-wl-section"><div class="card-title">\ud83c\udf10 \u4e16\u754c\u6cd5\u5219 <span class="bdg">v3.0.0</span></div>';
-    // preset buttons
-    html += '<div class="fg"><label>\u9884\u8bbe\u6846\u67b6\uff08\u70b9\u51fb\u4e00\u952e\u5e94\u7528\uff09</label>';
-    html += '<div class="flex" style="gap:4px;flex-wrap:wrap;">';
-    var PRESETS_LIST = [{id:'high_fantasy',name:'\u9ad8\u9b54\u4ed9\u4fa0',desc:'\u4fee\u771f\u4e16\u754c\uff0c\u7075\u529b\u4e3a\u5c0a',icon:'\ud83d\udc09'},{id:'cyber_xianxia',name:'\u8d5b\u535a\u4ed9\u4fa0',desc:'\u7075\u6c14\u4e0e\u82af\u7247\u5171\u5b58',icon:'\ud83e\udd16'},{id:'low_magic',name:'\u4f4e\u9b54\u73b0\u5b9e',desc:'\u9b54\u6cd5\u51e0\u4e4e\u7edd\u8ff9',icon:'\ud83c\udf0f'},{id:'steampunk',name:'\u84b8\u6c7d\u670b\u514b',desc:'\u84b8\u6c7d\u4e0e\u9f7f\u8f6e\u9a71\u52a8\u4e00\u5207',icon:'\u2699\ufe0f'},{id:'wuxia',name:'\u6b66\u4fa0\u6c5f\u6e56',desc:'\u671d\u5ef7\u4e0e\u6c5f\u6e56\u5e76\u884c',icon:'\u2694\ufe0f'},{id:'post_apocalyptic',name:'\u5e9f\u571f\u6c42\u751f',desc:'\u6587\u660e\u5d29\u6e83\u540e\u7684\u6b8b\u9177\u4e16\u754c',icon:'\u2622\ufe0f'}];
-    PRESETS_LIST.forEach(function(p){
-      html += '<button class="btn btn-sm htyq-wl-preset-btn" data-preset="'+p.id+'" title="'+esc(p.desc)+'" style="padding:4px 10px;font-size:11px;">'+p.icon+' '+p.name+'</button>';
-    });
-    html += '</div></div>';
-    html += '<div class="fr"><div class="fg"><label>\u6846\u67b6\u540d</label><input type="text" id="htyq-wf-name" value="'+esc(wl.frameworkName||'\u81ea\u5b9a\u4e49\u4e16\u754c')+'"></div></div>';
+    html += '<div class="card" id="htyq-wl-section"><div class="card-title">\ud83c\udf10 \u4e16\u754c\u6cd5\u5219 <span class="bdg">v3.0.0</span></div><div class="fr">';
+    html += '<div class="fg"><label>\u4e16\u754c\u6846\u67b6</label><select id="htyq-wf-framework">';
+    ['\u81ea\u5b9a\u4e49','\u5251\u4e0e\u9b54\u6cd5','\u79d1\u5e7b\u672a\u6765','\u5386\u53f2\u4f20\u5947','\u90fd\u5e02\u5f02\u80fd'].forEach(function(f){ html += '<option'+(f==='\u81ea\u5b9a\u4e49'?' selected':'')+'>'+f+'</option>'; });
+    html += '</select></div>';
+    html += '<div class="fg"><label>\u6846\u67b6\u540d</label><input type="text" id="htyq-wf-name" value="'+esc(wl.frameworkName||'\u81ea\u5b9a\u4e49\u4e16\u754c')+'"></div></div>';
     html += '<div class="fg"><label>\u4e16\u754c\u63cf\u8ff0</label><textarea id="htyq-wf-desc" rows="2">'+esc(wl.description||st.worldDescription||'')+'</textarea></div>';
     // dimension selectors
     html += '<div class="fr" style="grid-template-columns:1fr 1fr;">';
@@ -3698,7 +2576,7 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
     html += '<div class="fg"><label>\u81ea\u5b9a\u4e49\u6cd5\u5219</label>';
     html += '<div class="flex" style="gap:4px;flex-wrap:wrap;" id="htyq-wl-custom-rules">';
     if (wl.customRules && wl.customRules.length) {
-      wl.customRules.forEach(function(r, ri){ html += '<span class="tag tag-loc">'+esc(r)+' <span class="htyq-del-rule" data-index="'+ri+'" style="cursor:pointer;margin-left:2px;color:#f85149;font-size:11px;">\u2716</span></span> '; });
+      wl.customRules.forEach(function(r){ html += '<span class="tag tag-loc">'+esc(r)+'</span> '; });
     } else {
       html += '<span class="sm gray">\u6682\u65e0\u81ea\u5b9a\u4e49\u6cd5\u5219</span>';
     }
@@ -3720,44 +2598,6 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
     html += '<div class="sm gray" style="margin-bottom:8px;">\u4ee5\u4e0b\u64cd\u4f5c\u4e0d\u53ef\u6062\u590d\uff0c\u8bf7\u52ff\u8f7b\u8bd5\u3002</div>';
     html += '<button class="btn btn-danger" id="htyq-reset-all">\ud83d\uddd1\ufe0f \u91cd\u7f6e\u6240\u6709 HTYQ \u6570\u636e</button>';
     html += '<button class="btn btn-sm" id="htyq-reset-settings" style="margin-left:8px;">\u2699\ufe0f \u4ec5\u91cd\u7f6e\u8bbe\u7f6e</button></div>';
-
-    // v3.0.2: Keyboard shortcuts settings
-    var kbEnabled = _keyboardEnabled;
-    html += '<div class="card"><div class="card-title">\u2328 \u5feb\u6377\u952e</div>';
-    html += '<div class="fr"><div class="fg"><label>\u5f00\u542f\u5feb\u6377\u952e</label><label class="tg"><input type="checkbox" id="htyq-kb-toggle" '+(kbEnabled?'checked':'')+'><span class="s"></span></label></div></div>';
-    html += '<div style="margin-top:6px;font-size:10.5px;color:#8b949e;line-height:2;">';
-    html += '<kbd>Ctrl+Shift+H</kbd> \u5f00\u5173\u9762\u677f \u00b7 <kbd>Esc</kbd> \u5173\u95ed \u00b7 <kbd>1-9</kbd> Tab \u00b7 <kbd>R</kbd> \u5237\u65b0<br>';
-    html += '<kbd>Ctrl+Shift+O/A/W/M/E/T/B/S/K</kbd> \u8df3\u8f6c Tab</div></div>';
-
-    // v3.0.2: Theme sync + first-time wizard
-    html += '<div class="card"><div class="card-title">\ud83c\udfa8 \u4e3b\u9898 / \u5f15\u5bfc</div>';
-    html += '<div class="fr"><div class="fg"><label>\u540c\u6b65 SillyTavern \u4e3b\u9898</label><label class="tg"><input type="checkbox" id="htyq-theme-sync" checked><span class="s"></span></label></div></div>';
-    html += '<div class="fa"><button class="btn btn-sm" id="htyq-wizard-show">\ud83d\ude80 \u91cd\u65b0\u663e\u793a\u5f15\u5bfc</button></div></div>';
-
-    // v3.0.2: Backup & Storage
-    html += '<div class="card"><div class="card-title">\ud83d\udcbe \u5907\u4efd / \u5b58\u50a8</div>';
-    try {
-      var stateSize = new Blob([JSON.stringify(core.loadState())]).size;
-      var fmtSize = stateSize > 1024 ? Math.round(stateSize/1024)+' KB' : stateSize+' B';
-      var lastBak = localStorage.getItem('htyq_last_backup_time') || '\u672a\u5907\u4efd';
-      html += '<div class="sm gray" style="margin-bottom:6px;">\u72b6\u6001\u6570\u636e\u5927\u5c0f\uff1a'+fmtSize+' \u00b7 \u4e0a\u6b21\u5907\u4efd\uff1a'+lastBak+'</div>';
-    } catch(e) {}
-    html += '<div class="fa"><button class="btn btn-sm" id="htyq-backup-state">\ud83d\udcc2 \u5907\u4efd\u72b6\u6001</button>';
-    html += '<button class="btn btn-sm" id="htyq-restore-backup" style="margin-left:4px;">\ud83d\uddd2\ufe0f \u6062\u590d\u5907\u4efd</button></div></div>';
-
-    // v3.0.2: Bookmark management
-    var bms = getAchBookmarks();
-    html += '<div class="card"><div class="card-title">\u2b50 \u6210\u5c31\u6536\u85cf\u7ba1\u7406 <span class="bdg">'+(bms.length||0)+' \u4e2a\u6536\u85cf</span></div>';
-    if (bms.length) {
-      html += '<div style="display:flex;flex-wrap:wrap;gap:4px;">';
-      bms.forEach(function(bm){
-        html += '<span style="display:inline-flex;align-items:center;gap:2px;padding:2px 6px;background:#161b22;border-radius:10px;font-size:10px;">\u2b50 '+esc(bm)+' <button class="htyq-bm-remove" data-ach-id="'+esc(bm)+'" style="background:none;border:none;color:#f85149;cursor:pointer;padding:0 2px;">\u2716</button></span>';
-      });
-      html += '</div>';
-    } else {
-      html += '<div class="sm gray">\u5c1a\u65e0\u6536\u85cf</div>';
-    }
-    html += '<div class="fa"><button class="btn btn-sm" id="htyq-bm-clear-all">\ud83d\uddd1\ufe0f \u6e05\u7a7a\u6240\u6709\u6536\u85cf</button></div></div>';
 
     cont.innerHTML = html;
 
@@ -3782,181 +2622,40 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
         if (urlEl) s.apiUrl = urlEl.value;
         if (keyEl) s.apiKey = keyEl.value;
         if (modelEl) s.apiModel = modelEl.value;
-        var modeRadio = document.querySelector('input[name="htyq-api-mode"]:checked');
-        if (modeRadio) s.apiMode = modeRadio.value;
         localStorage.setItem('htyq_lite_settings', JSON.stringify(s));
         toast('\u2705 API \u8bbe\u7f6e\u5df2\u4fdd\u5b58');
       });
 
       var testApi = document.getElementById('htyq-test-api');
       if (testApi) testApi.addEventListener('click', async function(){
-        var modeRadio = document.querySelector('input[name="htyq-api-mode"]:checked');
-        var isCustom = modeRadio && modeRadio.value === 'custom';
-        this.disabled = true; var origText = this.innerHTML;
-        this.innerHTML = '⏳ 测试中...';
-        if (!isCustom) {
-          // Tavern 模式：直接用 ST generateRaw 测试
-          try {
-            var ctx = (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) ? SillyTavern.getContext() : null;
-            if (!ctx || typeof ctx.generateRaw !== 'function') {
-              toast('❌ ST 内部接口不可用', true);
-              this.disabled = false; this.innerHTML = origText; return;
-            }
-            var testResult = await ctx.generateRaw({
-              prompt: [{ role: 'user', content: '仅回复一个词：OK' }],
-              max_length: 10
-            });
-            var text = typeof testResult === 'string' ? testResult : (testResult.text || '');
-            if (text && text.trim()) {
-              sessionStorage.setItem('htyq_api_last_test', 'ok');
-              toast('✅ ST 内部接口正常！直接使用酒馆的 API 配置，无需额外设置');
-            } else {
-              sessionStorage.setItem('htyq_api_last_test', 'fail');
-              toast('⚠️ ST 返回空结果，请检查酒馆 API 设置', true);
-            }
-          } catch(e) {
-            sessionStorage.setItem('htyq_api_last_test', 'fail');
-            toast('❌ ST 内部接口失败: ' + e.message + '。可切换到自定义路由模式', true);
-          }
-          this.disabled = false; this.innerHTML = origText; return;
-        }
-        // Custom 模式：获取模型列表并填充 <select>
         var urlEl = document.getElementById('htyq-api-url');
         var keyEl = document.getElementById('htyq-api-key');
-        var modelSelect = document.getElementById('htyq-api-model');
+        var modelEl = document.getElementById('htyq-api-model');
         var apiUrl = urlEl ? urlEl.value : '';
-        if (!apiUrl) { toast('⚠️ 请先填写 API 地址', true); this.disabled = false; this.innerHTML = origText; return; }
+        if (!apiUrl) { toast('\u26a0\ufe0f \u8bf7\u5148\u586b\u5199 API \u5730\u5740', true); return; }
+        this.disabled = true; var origText = this.innerHTML;
+        this.innerHTML = '\u23f3 \u6d4b\u8bd5\u4e2d...';
         try {
-          var baseUrl = apiUrl.trim().replace(/\/+$/, '');
-          var modelsUrl = baseUrl + (baseUrl.endsWith('/v1') ? '/models' : '/v1/models');
-          var resp = await fetch(modelsUrl, {
+          var resp = await fetch(apiUrl + '/v1/models', {
             method: 'GET',
-            headers: { 'Authorization': 'Bearer ' + (keyEl ? keyEl.value : ''), 'Content-Type': 'application/json' },
-            signal: AbortSignal.timeout(10000)
+            headers: { 'Authorization': 'Bearer ' + (keyEl ? keyEl.value : ''), 'Content-Type': 'application/json' }
           });
-          if (resp.ok) {
-            sessionStorage.setItem('htyq_api_last_test', 'ok');
-            var modelData = await resp.json();
-            var rawModels = modelData.data || modelData.models || modelData.result || [];
-            if (Array.isArray(modelData)) rawModels = modelData;
-            var modelNames = [];
-            if (Array.isArray(rawModels)) {
-              modelNames = rawModels.map(function(m){ return m.id || m.name || m.model || m; }).filter(function(n){ return typeof n === 'string' && n.length > 0; });
-            }
-            if (modelSelect && modelSelect.tagName === 'SELECT') {
-              var curVal = modelSelect.value;
-              modelSelect.innerHTML = '';
-              modelNames.forEach(function(nm){
-                var opt = document.createElement('option');
-                opt.value = nm; opt.textContent = nm;
-                if (nm === curVal) opt.selected = true;
-                modelSelect.appendChild(opt);
-              });
-              if (!modelNames.length) {
-                var emptyOpt = document.createElement('option');
-                emptyOpt.value = ''; emptyOpt.textContent = '— 未发现模型 —';
-                modelSelect.appendChild(emptyOpt);
-              }
-              toast('✅ 连接成功！已加载 ' + modelNames.length + ' 个模型，请选择');
-            } else {
-              toast('✅ API 连接成功！');
-            }
-          } else {
-            sessionStorage.setItem('htyq_api_last_test', 'fail');
-            toast('⚠️ HTTP ' + resp.status + '，请检查地址和 Key', true);
-          }
+          if (resp.ok) { toast('\u2705 API \u8fde\u63a5\u6210\u529f\uff01'); } else { toast('\u26a0\ufe0f API \u8fd4\u56de: ' + resp.status, true); }
         } catch(e) {
+          // try koboldcpp style
           try {
             var resp2 = await fetch(apiUrl, { method: 'GET', signal: AbortSignal.timeout(5000) });
-            if (resp2.ok) {
-              sessionStorage.setItem('htyq_api_last_test', 'ok');
-              toast('✅ API 连接成功！');
-            } else {
-              sessionStorage.setItem('htyq_api_last_test', 'fail');
-              toast('⚠️ 连接失败: ' + resp2.status, true);
-            }
-          } catch(e2) {
-            sessionStorage.setItem('htyq_api_last_test', 'fail');
-            toast('❌ 无法连接 API: ' + e2.message, true);
-          }
+            if (resp2.ok) { toast('\u2705 API \u8fde\u63a5\u6210\u529f\uff01'); } else { toast('\u26a0\ufe0f \u8fde\u63a5\u5931\u8d25: ' + resp2.status, true); }
+          } catch(e2) { toast('\u274c \u65e0\u6cd5\u8fde\u63a5 API: ' + e2.message, true); }
         }
         this.disabled = false; this.innerHTML = origText;
       });
 
-      // ★ BUG FIX: radio 切换时动态启用/禁用 API 字段
-      document.querySelectorAll('input[name="htyq-api-mode"]').forEach(function(radio) {
-        radio.addEventListener('change', function() {
-          var isCustom = this.value === 'custom';
-          var urlEl = document.getElementById('htyq-api-url');
-          var keyEl = document.getElementById('htyq-api-key');
-          var modelWrap = document.getElementById('htyq-api-model');
-          var fieldsCont = document.getElementById('htyq-api-fields');
-          if (!fieldsCont) return;
-          // 切换 url/key 的 disabled
-          if (urlEl) { urlEl.disabled = !isCustom; if (!isCustom) urlEl.value = ''; }
-          if (keyEl) { keyEl.disabled = !isCustom; if (!isCustom) keyEl.value = ''; }
-          // 切换模型字段：custom→<select>，tavern→disabled <input>
-          if (modelWrap) {
-            var settings = JSON.parse(localStorage.getItem('htyq_lite_settings') || '{}');
-            if (isCustom) {
-              var savedM = settings.apiModel || '';
-              var sel = document.createElement('select');
-              sel.id = 'htyq-api-model';
-              sel.style.cssText = 'width:100%;padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;color:#e6edf3;font-size:12px;';
-              if (savedM) { var opt = document.createElement('option'); opt.value = savedM; opt.textContent = savedM; opt.selected = true; sel.appendChild(opt); }
-              var emptyOpt = document.createElement('option'); emptyOpt.value = ''; emptyOpt.textContent = '— 请点测试连接加载模型 —'; sel.appendChild(emptyOpt);
-              modelWrap.parentNode.replaceChild(sel, modelWrap);
-            } else {
-              var inp = document.createElement('input');
-              inp.type = 'text';
-              inp.id = 'htyq-api-model';
-              inp.value = '— 已使用 ST 内部设置 —';
-              inp.disabled = true;
-              inp.style.cssText = 'color:#8b949e;width:100%;padding:8px 10px;background:#0d1117;border:1px solid #30363d;border-radius:6px;font-size:12px;';
-              modelWrap.parentNode.replaceChild(inp, modelWrap);
-            }
-          }
-          // 更新提示文字
-          var hint = fieldsCont.previousElementSibling;
-          if (hint && hint.tagName === 'DIV') {
-            hint.innerHTML = isCustom
-              ? '✅ 自定义模式：填下面信息后点测试连接，模型列表会自动加载并可选择'
-              : 'ℹ️ ST 内部接口直接使用酒馆已配置的 API 和模型，下方字段无需填写';
-          }
-        });
-      });
-
       var saveGen = document.getElementById('htyq-save-general');
-      if (saveGen) saveGen.addEventListener('click', function(){
-        var s = JSON.parse(localStorage.getItem('htyq_lite_settings') || '{}');
-        var entitiesEl = document.getElementById('htyq-custom-entities');
-        if (entitiesEl) s.customEntities = entitiesEl.value;
-        var nsfwEl = document.getElementById('htyq-nsfw-ach');
-        if (nsfwEl) s.showNSFWAchievements = nsfwEl.checked;
-        localStorage.setItem('htyq_lite_settings', JSON.stringify(s));
-        toast('\u2705 \u901a\u7528\u8bbe\u7f6e\u5df2\u4fdd\u5b58');
-      });
+      if (saveGen) saveGen.addEventListener('click', function(){ toast('\u2705 \u901a\u7528\u8bbe\u7f6e\u5df2\u4fdd\u5b58'); });
 
       var saveSto = document.getElementById('htyq-save-storage');
-      if (saveSto) saveSto.addEventListener('click', function(){
-        var s = JSON.parse(localStorage.getItem('htyq_lite_settings') || '{}');
-        var hotEl = document.getElementById('htyq-mem-hot-threshold');
-        if (hotEl) s.hotMemoryRounds = parseInt(hotEl.value) || 50;
-        var impEl = document.getElementById('htyq-hot-importance');
-        if (impEl) s.hotMemoryImportance = parseInt(impEl.value) || 2;
-        var maxMemEl = document.getElementById('htyq-max-memory');
-        if (maxMemEl) s.maxMemory = parseInt(maxMemEl.value) || 500;
-        var achEl = document.getElementById('htyq-auto-ach');
-        if (achEl) s.autoAchievements = achEl.value.indexOf('\u5f00\u542f') >= 0;
-        var achLimitEl = document.getElementById('htyq-ach-limit');
-        if (achLimitEl) s.autoGenMaxPerChat = parseInt(achLimitEl.value) || 50;
-        var retryEl = document.getElementById('htyq-retry-count');
-        if (retryEl) s.retryCount = parseInt(retryEl.value) || 1;
-        var strictEl = document.getElementById('htyq-strict-evolve');
-        if (strictEl) s.strictEvolution = strictEl.checked;
-        localStorage.setItem('htyq_lite_settings', JSON.stringify(s));
-        toast('\u2705 \u5b58\u50a8\u8bbe\u7f6e\u5df2\u4fdd\u5b58');
-      });
+      if (saveSto) saveSto.addEventListener('click', function(){ toast('\u2705 \u5b58\u50a8\u8bbe\u7f6e\u5df2\u4fdd\u5b58'); });
 
       var exportSnap = document.getElementById('htyq-export-snapshot');
       if (exportSnap) exportSnap.addEventListener('click', function(){
@@ -4049,7 +2748,9 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
       if (saveWl) saveWl.addEventListener('click', function(){
         var st = core.loadState();
         if (!st.worldLaw) st.worldLaw = {};
+        var fwEl = document.getElementById('htyq-wf-framework');
         var fnEl = document.getElementById('htyq-wf-name');
+        st.worldLaw.framework = fwEl ? fwEl.value : '\u81ea\u5b9a\u4e49';
         st.worldLaw.frameworkName = fnEl ? fnEl.value : '\u81ea\u5b9a\u4e49\u4e16\u754c';
         // save dimension values
         if (!st.worldLaw.dimensions) st.worldLaw.dimensions = {};
@@ -4058,46 +2759,6 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
         });
         core.saveState(st);
         toast('\u2705 \u4e16\u754c\u6cd5\u5219\u5df2\u4fdd\u5b58');
-      });
-
-      // \u4e16\u754c\u6cd5\u5219\u9884\u8bbe\u4e00\u952e\u5e94\u7528
-      document.querySelectorAll('.htyq-wl-preset-btn').forEach(function(btn){
-        btn.addEventListener('click', function(){
-          var presetId = this.getAttribute('data-preset');
-          if (!presetId || typeof core.applyWorldLawPreset !== 'function') { toast('\u26a0\ufe0f \u9884\u8bbe\u7cfb\u7edf\u672a\u53ef\u7528', true); return; }
-          var st = core.loadState();
-          core.applyWorldLawPreset(st, presetId);
-          // \u66f4\u65b0\u6846\u67b6\u540d\u8f93\u5165\u6846
-          var fnEl = document.getElementById('htyq-wf-name');
-          if (fnEl && st.worldLaw && st.worldLaw.frameworkName) fnEl.value = st.worldLaw.frameworkName;
-          // \u66f4\u65b0\u7ef4\u5ea6\u4e0b\u62c9\u6846
-          var dims = st.worldLaw ? st.worldLaw.dimensions : {};
-          document.querySelectorAll('.htyq-wl-dim').forEach(function(sel){
-            var dimId = sel.getAttribute('data-dim');
-            if (dimId && dims[dimId] && dims[dimId].value) {
-              for (var oi = 0; oi < sel.options.length; oi++) {
-                if (sel.options[oi].value === dims[dimId].value) { sel.selectedIndex = oi; break; }
-              }
-            }
-          });
-          toast('\u2705 \u5df2\u5e94\u7528\u9884\u8bbe\uff1a' + this.textContent.trim() + '\uff0c\u8bf7\u70b9\u51fb\u300c\ud83d\udcbe \u4fdd\u5b58\u300d\u786e\u8ba4');
-        });
-      });
-
-      // \u81ea\u5b9a\u4e49\u6cd5\u5219\u5220\u9664
-      document.addEventListener('click', function(e){
-        var delSpan = e.target.closest('.htyq-del-rule');
-        if (!delSpan) return;
-        var idx = parseInt(delSpan.getAttribute('data-index'));
-        if (isNaN(idx)) return;
-        if (!confirm('\u786e\u5b9a\u5220\u9664\u8be5\u81ea\u5b9a\u4e49\u6cd5\u5219\uff1f')) return;
-        var st = core.loadState();
-        if (st.worldLaw && st.worldLaw.customRules) {
-          st.worldLaw.customRules.splice(idx, 1);
-          core.saveState(st);
-          toast('\u2705 \u5df2\u5220\u9664\u81ea\u5b9a\u4e49\u6cd5\u5219');
-          refresh();
-        }
       });
 
       // \u4e16\u754c\u6cd5\u5219 AI \u5206\u6790
@@ -4125,54 +2786,6 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
         input.value = '';
         toast('\u2705 \u5df2\u6dfb\u52a0\u6cd5\u5219\uff1a' + rule);
       });
-      // v3.0.2: keyboard shortcuts toggle
-      var kbToggle = document.getElementById('htyq-kb-toggle');
-      if (kbToggle) kbToggle.addEventListener('change', function(){
-        _keyboardEnabled = this.checked;
-        localStorage.setItem('htyq_keyboard_enabled', this.checked ? '1' : '0');
-        toast(this.checked ? '\u2328 \u5feb\u6377\u952e\u5df2\u5f00\u542f' : '\u2328 \u5feb\u6377\u952e\u5df2\u5173\u95ed');
-      });
-      // v3.0.2: wizard show
-      var wizardBtn = document.getElementById('htyq-wizard-show');
-      if (wizardBtn) wizardBtn.addEventListener('click', function(){ _showFirstTimeWizard(); });
-      // v3.0.2: backup & restore
-      var backupBtn = document.getElementById('htyq-backup-state');
-      if (backupBtn) backupBtn.addEventListener('click', function(){
-        var st = core.loadState();
-        localStorage.setItem('htyq_backup_state', JSON.stringify(st));
-        localStorage.setItem('htyq_last_backup_time', new Date().toLocaleString('zh-CN'));
-        toast('\ud83d\udcc2 \u72b6\u6001\u5df2\u5907\u4efd');
-      });
-      var restoreBtn = document.getElementById('htyq-restore-backup');
-      if (restoreBtn) restoreBtn.addEventListener('click', function(){
-        var bak = localStorage.getItem('htyq_backup_state');
-        if (!bak) { toast('\u26a0\ufe0f \u6ca1\u6709\u5907\u4efd\u53ef\u6062\u590d', true); return; }
-        if (!confirm('\u786e\u5b9a\u8981\u6062\u590d\u5907\u4efd\uff1f\u5f53\u524d\u72b6\u6001\u5c06\u88ab\u8986\u76d6\u3002')) return;
-        try {
-          var restored = JSON.parse(bak);
-          core.saveState(restored);
-          toast('\u2705 \u72b6\u6001\u5df2\u6062\u590d');
-          refresh();
-        } catch(e) {
-          toast('\u26a0\ufe0f \u6062\u590d\u5931\u8d25: '+e.message, true);
-        }
-      });
-      // v3.0.2: bookmark management
-      var bmClearAll = document.getElementById('htyq-bm-clear-all');
-      if (bmClearAll) bmClearAll.addEventListener('click', function(){
-        if (!confirm('\u786e\u5b9a\u6e05\u7a7a\u6240\u6709\u6210\u5c31\u6536\u85cf\uff1f')) return;
-        localStorage.setItem('htyq_ach_bookmarks', '[]');
-        toast('\u2b50 \u6240\u6709\u6536\u85cf\u5df2\u6e05\u7a7a');
-        refresh();
-      });
-      document.querySelectorAll('.htyq-bm-remove').forEach(function(btn){
-        btn.addEventListener('click', function(){
-          var aid = this.getAttribute('data-ach-id');
-          if (!aid) return;
-          toggleAchBookmark(aid);
-          refresh();
-        });
-      });
       // reset all data — double confirmation
       var resetAll = document.getElementById('htyq-reset-all');
       if (resetAll) resetAll.addEventListener('click', function(){
@@ -4189,66 +2802,6 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
         localStorage.removeItem('htyq_lite_settings');
         toast('\u2699\ufe0f \u8bbe\u7f6e\u5df2\u91cd\u7f6e\uff0c\u8bf7\u5237\u65b0\u9875\u9762');
         refresh();
-      });
-
-      // savepoint management
-      var spCreate = document.getElementById('htyq-sp-create');
-      if (spCreate) spCreate.addEventListener('click', function(){
-        var st = core.loadState();
-        if (typeof core.saveSavepoint === 'function') {
-          core.saveSavepoint(st);
-          toast('\u2705 \u4fdd\u5b58\u70b9\u5df2\u521b\u5efa\uff08\u5f53\u524d\u8f6e\u6b21: #' + (st.round||'') + '\uff09');
-        } else {
-          toast('\u26a0\ufe0f \u4fdd\u5b58\u70b9\u529f\u80fd\u672a\u53ef\u7528', true);
-        }
-      });
-      var spList = document.getElementById('htyq-sp-list');
-      if (spList) spList.addEventListener('click', function(){
-        var container = document.getElementById('htyq-sp-list-container');
-        if (!container) return;
-        if (container.style.display !== 'none') { container.style.display = 'none'; return; }
-        var sps = (typeof core.getSavepoints === 'function') ? core.getSavepoints() : [];
-        if (!sps.length) {
-          container.innerHTML = '<div class="sm gray">\u6682\u65e0\u4fdd\u5b58\u70b9</div>';
-        } else {
-          var spHtml = '';
-          for (var spi = sps.length - 1; spi >= 0; spi--) {
-            var sp = sps[spi];
-            spHtml += '<div class="sm gray" style="padding:4px 0;border-bottom:1px solid #21262d;display:flex;justify-content:space-between;">';
-            spHtml += '<span>\u7b2c ' + (sp.round||'?') + ' \u8f6e \u00b7 \u804a\u5929\u6d88\u606f ' + (sp.chatLen||'?') + ' \u6761</span>';
-            if (typeof core.rollbackToChatLength === 'function') {
-              spHtml += '<button class="btn btn-sm htyq-sp-rollback" data-chatlen="' + (sp.chatLen||0) + '" style="font-size:9px;padding:1px 6px;color:#d29922;">\u21a9\ufe0f \u56de\u6eda</button>';
-            }
-            spHtml += '</div>';
-          }
-          container.innerHTML = spHtml;
-          // bind rollback
-          container.querySelectorAll('.htyq-sp-rollback').forEach(function(rbBtn){
-            rbBtn.addEventListener('click', function(){
-              var chatLen = parseInt(this.getAttribute('data-chatlen'));
-              if (isNaN(chatLen)) return;
-              if (!confirm('\u786e\u5b9a\u56de\u6eda\u5230\u7b2c ' + chatLen + ' \u6761\u6d88\u606f\u7684\u72b6\u6001\uff1f')) return;
-              var restored = core.rollbackToChatLength(chatLen);
-              if (restored) {
-                toast('\u2705 \u5df2\u56de\u6eda\u5230\u7b2c ' + chatLen + ' \u6761\u6d88\u606f\u7684\u72b6\u6001');
-                refresh();
-              } else {
-                toast('\u26a0\ufe0f \u56de\u6eda\u5931\u8d25', true);
-              }
-            });
-          });
-        }
-        container.style.display = 'block';
-      });
-      var spClear = document.getElementById('htyq-sp-clear');
-      if (spClear) spClear.addEventListener('click', function(){
-        if (!confirm('\u786e\u5b9a\u6e05\u9664\u6240\u6709\u4fdd\u5b58\u70b9\uff1f')) return;
-        if (typeof core.clearSavepoints === 'function') {
-          core.clearSavepoints();
-          toast('\u2705 \u4fdd\u5b58\u70b9\u5df2\u6e05\u9664');
-          var container = document.getElementById('htyq-sp-list-container');
-          if (container) { container.style.display = 'none'; }
-        }
       });
     }, 50);
   }
@@ -4371,24 +2924,6 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
     html += '<h4>\u9884\u8bbe\u7cfb\u7edf</h4>';
     html += '<p>\u9884\u8bbe = \u6240\u6709\u6ce8\u5165\u8bbe\u7f6e\u6253\u5305\u3002\u53ef\u5efa\u591a\u4e2a\uff08\u6218\u6597\u7248/\u63a2\u7d22\u7248/\u5bf9\u8bdd\u7248\uff09\uff0c\u5feb\u901f\u5207\u6362\u3002</p></div></div>';
 
-    // v3.0.2: Changelog
-    html += '<div class="card hp-sect" style="border:1px solid #238636;"><h3>\ud83d\uddd2\ufe0f v3.0.2 \u66f4\u65b0\u65e5\u5fd7</h3>';
-    html += '<ul style="font-size:11px;color:#8b949e;line-height:1.8;">';
-    html += '<li>\u2795 \u5168\u5c40\u5feb\u6377\u64cd\u4f5c\u680f\uff08\u63a8\u6f14/\u64a4\u9500/\u5feb\u7167/\u9884\u8bbe/\u65f6\u95f4\u9884\u8bbe/API \u72b6\u6001/\u810f\u6307\u793a\u5668\uff09</li>';
-    html += '<li>\u2795 \u5feb\u6377\u952e\u652f\u6301\uff08Ctrl+Shift+H \u5f00\u5173\u9762\u677f\u30011-9 Tab\u3001R \u5237\u65b0\u7b49\uff09</li>';
-    html += '<li>\u2795 Tab \u7ea2\u70b9\u5fbd\u7ae0\uff08\u65b0\u89e3\u9501\u6210\u5c31/\u5f15\u64ce\u9519\u8bef\uff09</li>';
-    html += '<li>\u2795 \u6f14\u5316\u6458\u8981\u5f39\u7a97\uff08\u63a8\u6f14\u540e\u81ea\u52a8\u5f39\u51fa\u53d8\u5316\u6982\u8981\uff09</li>';
-    html += '<li>\u2795 API \u5065\u5eb7\u68c0\u67e5\uff08\u6bcf\u5206\u949f\u68c0\u67e5\u4e00\u6b21\uff09</li>';
-    html += '<li>\u2795 \u6210\u5c31\u6536\u85cf/\u8fc7\u6ee4\uff08\u2606/\u2b50 + \u6536\u85cf\u8fc7\u6ee4\uff09</li>';
-    html += '<li>\u2795 \u7edf\u8ba1\u4eea\u76d8\uff08\u603b\u89c8\u9875\u5e95\u90e8\u589e\u52a0\u6570\u636e\u4e00\u89c8\uff09</li>';
-    html += '<li>\u2795 \u8fde\u51fb\u53ef\u89c6\u5316\uff08\u5f15\u64ce\u9875\u589e\u52a0\u8fde\u51fb\u8fdb\u5ea6\u6761\uff09</li>';
-    html += '<li>\u2795 \u4e8b\u4ef6\u8fdb\u5ea6\u6761\uff08\u4e16\u754c\u9875\u4e8b\u4ef6\u53ef\u89c6\u5316\uff09</li>';
-    html += '<li>\u2795 \u7ae0\u8282/\u5377\u8fdb\u5ea6\u53ef\u89c6\u5316\uff08\u6545\u4e8b\u9875\uff09</li>';
-    html += '<li>\u2795 \u8bbe\u7f6e\u9875\u65b0\u589e\uff08\u5feb\u6377\u952e\u5f00\u5173/\u5f15\u5bfc/\u5907\u4efd/\u6536\u85cf\u7ba1\u7406\uff09</li>';
-    html += '<li>\u2795 \u9996\u6b21\u4f7f\u7528\u5f15\u5bfc\uff08\u81ea\u52a8\u5f39\u51fa 3 \u6b65\u6559\u7a0b\uff09</li>';
-    html += '<li>\u2795 \u4e3b\u9898\u540c\u6b65 SillyTavern</li>';
-    html += '</ul></div>';
-
     cont.innerHTML = html;
 
     // bind help tab switching
@@ -4407,11 +2942,7 @@ html += '<div class="card"><div class="flex-sb"><div class="card-title">\ud83c\u
           document.getElementById('htyq-help-' + this.dataset.htab).style.display = 'block';
         });
       });
-    },
-      {q:'\u4fdd\u5b58\u70b9\u600e\u4e48\u7528\uff1f',a:'\u8bbe\u7f6e\u9875\u65b0\u589e\u4e86\u4fdd\u5b58\u70b9\u7ba1\u7406\u533a\uff1a\u70b9\u51fb\u300c\ud83d\udcbe \u624b\u52a8\u521b\u5efa\u4fdd\u5b58\u70b9\u300d\u5b58\u5f53\u524d\u72b6\u6001\uff0c\u300c\ud83d\udcca \u67e5\u770b\u4fdd\u5b58\u70b9\u5217\u8868\u300d\u5c55\u5f00\u5217\u8868\uff0c\u6bcf\u4e2a\u4fdd\u5b58\u70b9\u53ef\u300c\u21a9\ufe0f \u56de\u6eda\u300d\u6062\u590d\u3002\u300c\ud83d\uddd1\ufe0f \u6e05\u9664\u5168\u90e8\u300d\u4e00\u952e\u6e05\u7a7a\u3002'},
-      {q:'API \u6a21\u5f0f\u6709\u51e0\u79cd\uff1f',a:'\u8bbe\u7f6e\u9875 API \u8fde\u63a5\u52a0\u4e86\u300cAPI \u8c03\u7528\u6a21\u5f0f\u300d\u5355\u9009\uff1a\u9009\u300cST \u5185\u90e8\u63a5\u53e3\u300d\u8d70 SillyTavern \u81ea\u5e26\u7684 API\uff08\u63a8\u8350\uff09\uff0c\u9009\u300c\u81ea\u5b9a\u4e49\u8def\u7531\u300d\u624b\u52a8\u586b URL/Key/Model\u3002'},
-      {q:'\u4e16\u754c\u6cd5\u5219\u9884\u8bbe\u600e\u4e48\u7528\uff1f',a:'\u4e16\u754c\u4e66\u9875\u2192\u4e16\u754c\u6cd5\u5219\u533a\u9876\u90e8\u6709 6 \u5957\u9884\u8bbe\u6309\u94ae\uff1a\u9ad8\u9b54\u4ed9\u4fa0/\u8d5b\u535a\u4ed9\u4fa0/\u4f4e\u9b54\u73b0\u5b9e/\u84b8\u6c7d\u670b\u514b/\u6b66\u4fa0\u6c5f\u6e56/\u5e9f\u571f\u6c42\u751f\u3002\u70b9\u4e00\u4e0b\u81ea\u52a8\u586b\u5145 6 \u4e2a\u7ef4\u5ea6\u503c\uff0c\u518d\u70b9\u300c\ud83d\udcbe \u4fdd\u5b58\u300d\u786e\u8ba4\u3002'},
-      {q:'\u9762\u677f\u53ef\u4ee5\u62d6\u52a8\u5417\uff1f',a:'\u53ef\u4ee5\u3002\u62ac\u5934\u90e8\u7684\u300c\u25c8 HTYQ Lite\u300d\u6807\u9898\u680f\u53ef\u62d6\u52a8\u6574\u4e2a\u9762\u677f\uff0c\u53f3\u4e0b\u89d2\u7684\u62d6\u62fd\u624b\u67c4\u53ef\u8c03\u5927\u5c0f\u3002'}, 50);
+    }, 50);
   }
 
   /* ═══════════════════ EXPORTS ═══════════════════ */
